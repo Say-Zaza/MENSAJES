@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Solo usuarios autenticados (anónimos) pueden leer/escribir mensajes
+    match /rooms/{roomId}/messages/{messageId} {
+      allow read, write: if request.auth != null;
+    }
+    // Solo usuarios autenticados pueden leer/escribir la lista de usuarios registrados
+    match /rooms/{roomId}/users/{userId} {
+      allow read: if request.auth != null;
+      // Solo puede escribir su propio documento
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    // Indicadores de typing
+    match /rooms/{roomId}/typing/{userId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

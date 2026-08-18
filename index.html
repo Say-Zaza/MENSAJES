@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Efímero con Respaldo Local & Purga de 5 Días</title>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css">
+   
+  <!-- Firebase SDK v10 compat -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <div class="chat-container" id="chat-container">
+    <!-- Overlay Drag & Drop -->
+    <div id="drag-drop-overlay" class="drag-drop-overlay hidden">
+      <div class="drag-drop-box">
+        <span class="drag-drop-icon">📸</span>
+        <p>Suelta tu imagen aquí para enviarla</p>
+      </div>
+    </div>
+
+    <!-- Modal de bienvenida -->
+    <div id="welcome-modal" class="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+      <div class="welcome-modal-content">
+        <h2 id="welcome-title">👋 Bienvenido al Chat</h2>
+        <p>Elige tu nombre para comunicarte:</p>
+        <input 
+          type="text" 
+          id="username-input" 
+          placeholder="Tu nombre o apodo"
+          maxlength="20"
+          autocomplete="off"
+          autofocus
+          aria-describedby="username-hint"
+        >
+        <button id="username-submit" class="btn-primary" disabled>Entrar al chat</button>
+        <p id="username-hint" class="hint">Máx 20 caracteres · Respaldo automático en este equipo</p>
+      </div>
+    </div>
+
+    <!-- Cabecera -->
+    <header class="chat-header">
+      <div class="room-info">
+        <div class="header-top-row">
+          <h1 id="room-title">Chat General</h1>
+          <span class="sync-badge" title="Toda la información e imágenes se respaldan en esta computadora y se eliminan de Firebase tras 5 días">
+            <span class="status-dot"></span> 💾 Respaldo PC (Purga 5d)
+          </span>
+        </div>
+        <div class="header-sub-row">
+          <span id="user-badge" class="user-badge">Conectando...</span>
+          <span id="pending-indicator" class="pending-indicator hidden"></span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button type="button" id="search-toggle-btn" class="btn-icon" aria-label="Buscar mensajes" title="Buscar mensajes">🔍</button>
+        <button type="button" id="change-name-btn" class="btn-icon" aria-label="Cambiar nombre" title="Cambiar nombre">✏️</button>
+      </div>
+    </header>
+
+    <!-- Barra de búsqueda rápida -->
+    <div id="search-bar" class="search-bar hidden">
+      <input type="text" id="search-input" placeholder="Buscar en mensajes..." autocomplete="off">
+      <button type="button" id="search-close-btn" class="btn-search-close">&times;</button>
+    </div>
+
+    <!-- Contenedor principal de los mensajes -->
+    <main class="chat-messages" id="messages-container">
+      <div class="welcome-message" id="welcome-message">
+        <div class="welcome-icon">💬</div>
+        <h2>¡Sala de Chat Lista!</h2>
+        <p>Tus mensajes e imágenes se sincronizan en tiempo real. Se respaldan localmente en este equipo y se purgan de Firebase pasados 5 días para mayor privacidad y ligereza.</p>
+      </div>
+    </main>
+
+    <!-- Pie de página -->
+    <footer class="chat-input-area">
+      <form id="chat-form" class="chat-form" onsubmit="return false;">
+        <button type="button" id="emoji-btn" class="btn-emoji" aria-label="Abrir emojis">😀</button>
+        <div id="emoji-picker" class="emoji-picker hidden"></div>
+        <button type="button" id="image-btn" class="btn-image" aria-label="Adjuntar imagen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+        </button>
+        <input type="file" id="image-input" accept="image/*" capture="environment" style="display: none;" />
+        <input 
+          type="text" 
+          id="message-input" 
+          placeholder="Escribe un mensaje..." 
+          autocomplete="off" 
+          required
+          maxlength="1000"
+          disabled
+        >
+        <button type="submit" id="send-btn" class="btn-send" aria-label="Enviar mensaje" disabled>
+          <svg class="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </form>
+    </footer>
+  </div>
+
+  <!-- Reaction Emoji Picker Modal -->
+  <div id="reaction-picker" class="reaction-picker hidden" role="dialog" aria-label="Seleccionar reacción">
+    <div class="reaction-picker-content"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

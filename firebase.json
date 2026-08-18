@@ -1,0 +1,37 @@
+{
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "node_modules/**",
+      "server.js",
+      "database.json",
+      "package*.json",
+      "cloudflared.exe",
+      "README.md",
+      ".firebaserc",
+      "firebase.json",
+      "storage.rules"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css|html)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=0, must-revalidate"
+          }
+        ]
+      }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}

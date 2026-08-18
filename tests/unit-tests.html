@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unit Tests - Chat App</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { color: #333; }
+    .test-suite { margin-bottom: 2rem; padding: 1rem; border: 1px solid #ddd; border-radius: 8px; }
+    .test-suite h2 { margin-top: 0; color: #555; }
+    .test { padding: 0.5rem; margin: 0.5rem 0; border-radius: 4px; display: flex; align-items: center; gap: 0.5rem; }
+    .test.pass { background: #e8f5e9; border-left: 4px solid #4caf50; }
+    .test.fail { background: #ffebee; border-left: 4px solid #f44336; }
+    .test-name { flex: 1; font-family: monospace; }
+    .test-error { color: #c62828; font-size: 0.85rem; margin-top: 0.25rem; }
+    .summary { padding: 1rem; background: #f5f5f5; border-radius: 8px; margin-top: 2rem; }
+    .summary.pass { background: #e8f5e9; color: #2e7d32; }
+    .summary.fail { background: #ffebee; color: #c62828; }
+  </style>
+</head>
+<body>
+  <h1>🧪 Unit Tests</h1>
+  <div id="results"></div>
+  <div id="summary" class="summary"></div>
+
+  <script type="module">
+    // ============================================
+    // TEST HELPERS (copied from app.js)
+    // ============================================
+    function safeGetLocalStorage(key) {
+      try { return localStorage.getItem(key); } catch { return null; }
+    }
+    function safeSetLocalStorage(key, value) {
+      try { localStorage.setItem(key, value); return true; } catch { return false; }
+    }
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    function formatTime(timestamp) {
+      if (!timestamp) return '--:--';
+      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+
+    // ============================================
+    // TEST RUNNER
+    // ============================================
+    const results = [];
+    function test(name, fn) {
+      try {
+        fn();
+        results.push({ name, pass: true });
+      } catch (e) {
+        results.push({ name, pass: false, error: e.message });
+      }
+    }
+    function assertEqual(actual, expected, msg = '') {
+      if (actual !== expected) throw new Error(`${msg} Expected ${expected}, got ${actual}`);
+    }
+    function assertTrue(val, msg = '') {
+      if (!val) throw new Error(`${msg} Expected truthy, got ${val}`);
+    }
+    function assertFalse(val, msg = '') {
+      if (val) throw new Error(`${msg} Expected falsy, got ${val}`);
+    }
+
+    // ============================================
+    // TESTS
+    // ============================================
+    
+    // safeGetLocalStorage
+    test('safeGetLocalStorage: returns value when key exists', () => {
+      localStorage.setItem('test_key', 'test_value');
+      assertEqual(safeGetLocalStorage('test_key'), 'test_value');
+      localStorage.removeItem('test_key');
+    });
+    test('safeGetLocalStorage: returns null when key missing', () => {
+      assertEqual(safeGetLocalStorage('nonexistent_key'), null);
+    });
+    test('safeGetLocalStorage: returns null when localStorage blocked', () => {
+      // Simulate blocked localStorage by temporarily overriding
+      const original = window.localStorage;
+      Object.defineProperty(window, 'localStorage', {
+        value: { getItem: () => { throw new Error('Blocked'); } },
+        configurable: true
+      });
+      assertEqual(safeGetLocalStorage('any_key'), null);
+      Object.defineProperty(window, 'localStorage', { value: original, configurable: true });
+    });
+
+    // safeSetLocalStorage
+    test('safeSetLocalStorage: returns true on success', () => {
+      assertTrue(safeSetLocalStorage('test_set', 'value'));
+      localStorage.removeItem('test_set');
+    });
+    test('safeSetLocalStorage: returns false when blocked', () => {
+      const original = window.localStorage;
+      Object.defineProperty(window, 'localStorage', {
+        value: { setItem: () => { throw new Error('Blocked'); } },
+        configurable: true
+      });
+      assertFalse(safeSetLocalStorage('test', 'value'));
+      Object.defineProperty(window, 'localStorage', { value: original, configurable: true });
+    });
+
+    // escapeHtml
+    test('escapeHtml: escapes < > & " \'', () => {
+      assertEqual(escapeHtml('<script>'), '<script>');
+      assertEqual(escapeHtml('"quotes"'), '"quotes"');
+      assertEqual(escapeHtml("'single'"), ''single'');
+      assertEqual(escapeHtml('&'), '&amp;');
+    });
+    test('escapeHtml: handles empty string', () => {
+      assertEqual(escapeHtml(''), '');
+    });
+
+    // formatTime
+    test('formatTime: formats Date object', () => {
+      const date = new Date('2024-01-15T14:30:00');
+      assertEqual(formatTime(date), '14:30');
+    });
+    test('formatTime: formats timestamp number', () => {
+      const ts = new Date('2024-01-15T09:05:00').getTime();
+      assertEqual(formatTime(ts), '09:05');
+    });
+    test('formatTime: returns --:-- for null/undefined', () => {
+      assertEqual(formatTime(null), '--:--');
+      assertEqual(formatTime(undefined), '--:--');
+    });
+
+    // ============================================
+    // RENDER RESULTS
+    // ============================================
+    const container = document.getElementById('results');
+    results.forEach(r => {
+      const div = document.createElement('div');
+      div.className = `test ${r.pass ? 'pass' : 'fail'}`;
+      div.innerHTML = `<span class="test-name">${r.name}</span>${r.pass ? '✅' : '❌'}`;
+      if (!r.pass) {
+        const err = document.createElement('div');
+        err.className = 'test-error';
+        err.textContent = r.error;
+        div.appendChild(err);
+      }
+      container.appendChild(div);
+    });
+
+    const passed = results.filter(r => r.pass).length;
+    const failed = results.filter(r => !r.pass).length;
+    const summary = document.getElementById('summary');
+    summary.className = `summary ${failed === 0 ? 'pass' : 'fail'}`;
+    summary.innerHTML = `<strong>Resultado: </strong>${passed} passed, ${failed} failed`;
+  </script>
+</body>
+</html>

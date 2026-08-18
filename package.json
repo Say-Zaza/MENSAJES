@@ -1,0 +1,31 @@
+{
+  "name": "nueva-carpeta",
+  "version": "2.0.0",
+  "description": "Chat en tiempo real 100% Firebase (Hosting + Firestore + Auth) - Gratis, sin servidor propio",
+  "main": "app.js",
+  "scripts": {
+    "test": "npx cypress run",
+    "test:open": "npx cypress open",
+    "test:unit": "npx serve tests -l 8080 && echo 'Open http://localhost:8080/unit-tests.html'",
+    "dev": "npx serve .",
+    "deploy": "firebase deploy",
+    "deploy:hosting": "firebase deploy --only hosting",
+    "deploy:firestore": "firebase deploy --only firestore:rules,firestore:indexes",
+    "test:loop": "node tests/looping-test.js",
+    "sync": "node -e \"require('./sync-service.js').runSyncAndPrune()\""
+  },
+  "keywords": [
+    "chat",
+    "firebase",
+    "realtime",
+    "firestore"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {},
+  "devDependencies": {
+    "cypress": "^13.0.0",
+    "firebase-tools": "^13.0.0",
+    "serve": "^14.2.0"
+  }
+}
