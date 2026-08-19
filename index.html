@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Efímero con Respaldo Local & Purga de 5 Días</title>
+  <title>Chat Pareja 💕</title>
   
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,44 +27,38 @@
       </div>
     </div>
 
-    <!-- Modal de bienvenida -->
-    <div id="welcome-modal" class="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
-      <div class="welcome-modal-content">
-        <h2 id="welcome-title">👋 Bienvenido al Chat</h2>
-        <p>Elige tu nombre para comunicarte:</p>
-        <input 
-          type="text" 
-          id="username-input" 
-          placeholder="Tu nombre o apodo"
-          maxlength="20"
-          autocomplete="off"
-          autofocus
-          aria-describedby="username-hint"
-        >
-        <button id="username-submit" class="btn-primary" disabled>Entrar al chat</button>
-        <p id="username-hint" class="hint">Máx 20 caracteres · Respaldo automático en este equipo</p>
-      </div>
-    </div>
-
     <!-- Cabecera -->
     <header class="chat-header">
       <div class="room-info">
         <div class="header-top-row">
-          <h1 id="room-title">Chat General</h1>
-          <span class="sync-badge" title="Toda la información e imágenes se respaldan en esta computadora y se eliminan de Firebase tras 5 días">
-            <span class="status-dot"></span> 💾 Respaldo PC (Purga 5d)
+          <h1 id="room-title">💕 Chat Pareja</h1>
+          <span class="sync-badge" title="Mensajes respaldados localmente y purgados de Firebase tras 5 días">
+            <span class="status-dot"></span> 💾 Sync
           </span>
         </div>
         <div class="header-sub-row">
           <span id="user-badge" class="user-badge">Conectando...</span>
           <span id="pending-indicator" class="pending-indicator hidden"></span>
+          <div id="typing-indicator" class="typing-indicator hidden"></div>
         </div>
       </div>
       <div class="header-actions">
+        <!-- Mensajes fijados -->
+        <button type="button" id="pinned-btn" class="btn-icon hidden" aria-label="Ver mensaje fijado" title="Ver mensaje fijado">📌</button>
         <button type="button" id="search-toggle-btn" class="btn-icon" aria-label="Buscar mensajes" title="Buscar mensajes">🔍</button>
-        <button type="button" id="change-name-btn" class="btn-icon" aria-label="Cambiar nombre" title="Cambiar nombre">✏️</button>
+        <button type="button" id="settings-btn" class="btn-icon" aria-label="Ajustes" title="Ajustes">⚙️</button>
       </div>
     </header>
+
+    <!-- Banner mensaje fijado -->
+    <div id="pinned-banner" class="pinned-banner hidden">
+      <span class="pinned-icon">📌</span>
+      <div class="pinned-content">
+        <span class="pinned-label">Mensaje fijado</span>
+        <span id="pinned-text" class="pinned-text"></span>
+      </div>
+      <button type="button" id="pinned-close-btn" class="pinned-close" aria-label="Cerrar">×</button>
+    </div>
 
     <!-- Barra de búsqueda rápida -->
     <div id="search-bar" class="search-bar hidden">
@@ -76,8 +70,8 @@
     <main class="chat-messages" id="messages-container">
       <div class="welcome-message" id="welcome-message">
         <div class="welcome-icon">💬</div>
-        <h2>¡Sala de Chat Lista!</h2>
-        <p>Tus mensajes e imágenes se sincronizan en tiempo real. Se respaldan localmente en este equipo y se purgan de Firebase pasados 5 días para mayor privacidad y ligereza.</p>
+        <h2>¡Chat Listo!</h2>
+        <p>Tus mensajes se sincronizan en tiempo real y se respaldan localmente. Se purgan de Firebase pasados 5 días.</p>
       </div>
     </main>
 
@@ -94,12 +88,13 @@
           </svg>
         </button>
         <input type="file" id="image-input" accept="image/*" capture="environment" style="display: none;" />
+        <!-- Botón de voz -->
+        <button type="button" id="voice-btn" class="btn-voice" aria-label="Grabar audio" title="Mantén presionado para grabar">🎙️</button>
         <input 
           type="text" 
           id="message-input" 
           placeholder="Escribe un mensaje..." 
           autocomplete="off" 
-          required
           maxlength="1000"
           disabled
         >
@@ -113,9 +108,88 @@
     </footer>
   </div>
 
+  <!-- Indicador de grabación de voz -->
+  <div id="voice-recording-indicator" class="voice-recording-indicator hidden">
+    <div class="voice-rec-inner">
+      <span class="voice-rec-dot"></span>
+      <span id="voice-rec-time" class="voice-rec-time">0:00</span>
+      <span class="voice-rec-hint">Suelta para enviar · Desliza para cancelar</span>
+    </div>
+  </div>
+
+  <!-- Modal de Ajustes -->
+  <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-label="Ajustes">
+    <div class="settings-modal-content">
+      <div class="settings-header">
+        <h2>⚙️ Ajustes</h2>
+        <button type="button" id="settings-close-btn" class="btn-icon" aria-label="Cerrar ajustes">×</button>
+      </div>
+      <div class="settings-body">
+        <!-- Cambiar usuario -->
+        <div class="settings-section">
+          <h3>👤 Tu Usuario</h3>
+          <p class="settings-desc">Cambia entre los dos perfiles fijos de la pareja.</p>
+          <div class="user-switch-btns">
+            <button type="button" id="switch-user1-btn" class="btn-user-switch" data-key="user1">
+              <span class="usr-avatar">💙</span>
+              <span class="usr-name">Tú</span>
+            </button>
+            <button type="button" id="switch-user2-btn" class="btn-user-switch" data-key="user2">
+              <span class="usr-avatar">💗</span>
+              <span class="usr-name">Mi Amor</span>
+            </button>
+          </div>
+        </div>
+        <!-- Contador de mensajes -->
+        <div class="settings-section">
+          <h3>📊 Estadísticas</h3>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-number" id="stat-total">—</span>
+              <span class="stat-label">Total mensajes</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="stat-mine">—</span>
+              <span class="stat-label">Mis mensajes</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="stat-partner">—</span>
+              <span class="stat-label">De mi amor</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="stat-images">—</span>
+              <span class="stat-label">Imágenes</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-number" id="stat-audios">—</span>
+              <span class="stat-label">Audios</span>
+            </div>
+          </div>
+        </div>
+        <!-- Sistema -->
+        <div class="settings-section">
+          <h3>⚡ Sistema</h3>
+          <p class="settings-desc">Los mensajes se respaldan en esta PC y se purgan de Firebase tras 5 días para mayor privacidad.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Reaction Emoji Picker Modal -->
   <div id="reaction-picker" class="reaction-picker hidden" role="dialog" aria-label="Seleccionar reacción">
     <div class="reaction-picker-content"></div>
+  </div>
+
+  <!-- Modal de edición -->
+  <div id="edit-modal" class="edit-modal hidden" role="dialog" aria-modal="true">
+    <div class="edit-modal-content">
+      <h3>✏️ Editar mensaje</h3>
+      <textarea id="edit-input" class="edit-textarea" maxlength="1000" rows="3"></textarea>
+      <div class="edit-modal-actions">
+        <button type="button" id="edit-cancel-btn" class="btn-edit-cancel">Cancelar</button>
+        <button type="button" id="edit-save-btn" class="btn-edit-save">Guardar</button>
+      </div>
+    </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

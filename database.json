@@ -322,6 +322,33 @@
         "localMediaPath": "/media/img_lKOUJcvwCuNMIgwP26B6.png"
       },
       {
+        "id": "ss3TNtuD6CUVHGQgvUtX",
+        "texto": "Mensaje de prueba antiguo #1 (6 días atrás)",
+        "autor": "TesterAuto",
+        "uid": "test_bot_loop",
+        "imageBase64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "timestamp": 1786545360412,
+        "localMediaPath": "/media/img_ss3TNtuD6CUVHGQgvUtX.png"
+      },
+      {
+        "id": "VV1yerxxtprjAyw3trXj",
+        "texto": "Mensaje de prueba antiguo #2 (6 días atrás)",
+        "autor": "TesterAuto",
+        "uid": "test_bot_loop",
+        "imageBase64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "timestamp": 1786545388766,
+        "localMediaPath": "/media/img_VV1yerxxtprjAyw3trXj.png"
+      },
+      {
+        "id": "k5hHoF10ask8MeF1JTU8",
+        "texto": "Mensaje de prueba antiguo #3 (6 días atrás)",
+        "autor": "TesterAuto",
+        "uid": "test_bot_loop",
+        "imageBase64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "timestamp": 1786545392142,
+        "localMediaPath": "/media/img_k5hHoF10ask8MeF1JTU8.png"
+      },
+      {
         "texto": "hola",
         "autor": "Usuario_4787",
         "timestamp": 1787009611856
