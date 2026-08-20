@@ -22,10 +22,13 @@
   ],
   "author": "",
   "license": "ISC",
-  "dependencies": {},
+  "dependencies": {
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  },
   "devDependencies": {
     "cypress": "^13.0.0",
-    "firebase-tools": "^13.0.0",
+    "firebase-tools": "^13.35.1",
     "serve": "^14.2.0"
   }
 }

@@ -2,147 +2,271 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Chat Pareja">
   <title>Chat Pareja 💕</title>
-  
+
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  
+
   <link rel="stylesheet" href="style.css">
-   
+
   <!-- Firebase SDK v10 compat -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <!-- Icon System -->
+  <script src="icons.js"></script>
 </head>
 <body>
   <div class="chat-container" id="chat-container">
-    <!-- Overlay Drag & Drop -->
-    <div id="drag-drop-overlay" class="drag-drop-overlay hidden">
+    <!-- Drag & Drop Overlay -->
+    <div id="drag-drop-overlay" class="drag-drop-overlay hidden" aria-hidden="true">
       <div class="drag-drop-box">
-        <span class="drag-drop-icon">📸</span>
+        <span class="drag-drop-icon" aria-hidden="true"></span>
         <p>Suelta tu imagen aquí para enviarla</p>
       </div>
     </div>
 
-    <!-- Cabecera -->
-    <header class="chat-header">
+    <!-- Offline Banner -->
+    <div id="offline-banner" class="offline-banner hidden" role="status" aria-live="polite">
+      <span class="offline-icon" aria-hidden="true"></span>
+      <span class="offline-text">Sin conexión - Los mensajes se enviarán al reconectar</span>
+    </div>
+
+    <!-- Header -->
+    <header class="chat-header" role="banner">
       <div class="room-info">
         <div class="header-top-row">
-          <h1 id="room-title">💕 Chat Pareja</h1>
+          <h1 id="room-title">Chat Pareja</h1>
           <span class="sync-badge" title="Mensajes respaldados localmente y purgados de Firebase tras 5 días">
-            <span class="status-dot"></span> 💾 Sync
+            <span class="sync-icon" aria-hidden="true"></span>
+            <span class="status-dot" aria-hidden="true"></span>
+            <span>Sync</span>
           </span>
         </div>
         <div class="header-sub-row">
           <span id="user-badge" class="user-badge">Conectando...</span>
-          <span id="pending-indicator" class="pending-indicator hidden"></span>
-          <div id="typing-indicator" class="typing-indicator hidden"></div>
+          <span id="pending-indicator" class="pending-indicator hidden" aria-live="polite"></span>
+          <div id="typing-indicator" class="typing-indicator hidden" aria-live="polite"></div>
         </div>
       </div>
       <div class="header-actions">
-        <!-- Mensajes fijados -->
-        <button type="button" id="pinned-btn" class="btn-icon hidden" aria-label="Ver mensaje fijado" title="Ver mensaje fijado">📌</button>
-        <button type="button" id="search-toggle-btn" class="btn-icon" aria-label="Buscar mensajes" title="Buscar mensajes">🔍</button>
-        <button type="button" id="settings-btn" class="btn-icon" aria-label="Ajustes" title="Ajustes">⚙️</button>
+        <button type="button" id="pinned-btn" class="btn-icon hidden" aria-label="Ver mensaje fijado" title="Mensaje fijado" aria-expanded="false">
+          <span class="btn-icon-inner" aria-hidden="true"></span>
+        </button>
+        <button type="button" id="search-toggle-btn" class="btn-icon" aria-label="Buscar mensajes" title="Buscar mensajes">
+          <span class="btn-icon-inner" aria-hidden="true"></span>
+        </button>
+        <button type="button" id="settings-btn" class="btn-icon" aria-label="Ajustes" title="Ajustes">
+          <span class="btn-icon-inner" aria-hidden="true"></span>
+        </button>
       </div>
     </header>
 
-    <!-- Banner mensaje fijado -->
-    <div id="pinned-banner" class="pinned-banner hidden">
-      <span class="pinned-icon">📌</span>
+    <!-- Pinned Message Banner -->
+    <div id="pinned-banner" class="pinned-banner hidden" role="status" aria-live="polite">
+      <span class="pinned-icon" aria-hidden="true"></span>
       <div class="pinned-content">
         <span class="pinned-label">Mensaje fijado</span>
         <span id="pinned-text" class="pinned-text"></span>
       </div>
-      <button type="button" id="pinned-close-btn" class="pinned-close" aria-label="Cerrar">×</button>
+      <button type="button" id="pinned-close-btn" class="pinned-close" aria-label="Cerrar mensaje fijado">
+        <span aria-hidden="true"></span>
+      </button>
     </div>
 
-    <!-- Barra de búsqueda rápida -->
-    <div id="search-bar" class="search-bar hidden">
-      <input type="text" id="search-input" placeholder="Buscar en mensajes..." autocomplete="off">
-      <button type="button" id="search-close-btn" class="btn-search-close">&times;</button>
+    <!-- Search Bar -->
+    <div id="search-bar" class="search-bar hidden" role="search">
+      <label for="search-input" class="sr-only">Buscar en mensajes</label>
+      <input type="search" id="search-input" placeholder="Buscar en mensajes..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <button type="button" id="search-close-btn" class="btn-search-close" aria-label="Cerrar búsqueda">
+        <span aria-hidden="true"></span>
+      </button>
     </div>
 
-    <!-- Contenedor principal de los mensajes -->
-    <main class="chat-messages" id="messages-container">
+    <!-- Messages Container -->
+    <main class="chat-messages" id="messages-container" role="log" aria-live="polite" aria-label="Conversación">
       <div class="welcome-message" id="welcome-message">
-        <div class="welcome-icon">💬</div>
+        <div class="welcome-icon" aria-hidden="true"></div>
         <h2>¡Chat Listo!</h2>
         <p>Tus mensajes se sincronizan en tiempo real y se respaldan localmente. Se purgan de Firebase pasados 5 días.</p>
       </div>
     </main>
 
-    <!-- Pie de página -->
+    <!-- New Messages Indicator (floating) -->
+    <button type="button" id="scroll-to-bottom-btn" class="scroll-to-bottom hidden" aria-label="Ir a mensajes nuevos">
+      <span class="scroll-icon" aria-hidden="true"></span>
+      <span class="scroll-count" aria-live="polite"></span>
+    </button>
+
+    <!-- Footer Input Area -->
     <footer class="chat-input-area">
-      <form id="chat-form" class="chat-form" onsubmit="return false;">
-        <button type="button" id="emoji-btn" class="btn-emoji" aria-label="Abrir emojis">😀</button>
-        <div id="emoji-picker" class="emoji-picker hidden"></div>
-        <button type="button" id="image-btn" class="btn-image" aria-label="Adjuntar imagen">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <circle cx="8.5" cy="8.5" r="1.5"></circle>
-            <polyline points="21 15 16 10 5 21"></polyline>
-          </svg>
+      <!-- Reply Preview Bar -->
+      <div id="reply-preview" class="reply-preview hidden" role="status" aria-live="polite">
+        <div class="reply-preview-content"></div>
+        <button type="button" class="reply-preview-close" aria-label="Cancelar respuesta">
+          <span aria-hidden="true"></span>
         </button>
-        <input type="file" id="image-input" accept="image/*" capture="environment" style="display: none;" />
-        <!-- Botón de voz -->
-        <button type="button" id="voice-btn" class="btn-voice" aria-label="Grabar audio" title="Mantén presionado para grabar">🎙️</button>
-        <input 
-          type="text" 
-          id="message-input" 
-          placeholder="Escribe un mensaje..." 
-          autocomplete="off" 
-          maxlength="1000"
-          disabled
-        >
+      </div>
+
+      <form id="chat-form" class="chat-form" onsubmit="return false;">
+        <div class="input-left-actions">
+          <button type="button" id="emoji-btn" class="btn-emoji" aria-label="Abrir emojis" aria-expanded="false">
+            <span class="btn-emoji-inner" aria-hidden="true"></span>
+          </button>
+          <div id="emoji-picker" class="emoji-picker hidden" role="dialog" aria-label="Seleccionar emoji"></div>
+        </div>
+
+        <div class="input-center">
+          <button type="button" id="image-btn" class="btn-media" aria-label="Adjuntar imagen" title="Imagen">
+            <span class="btn-media-inner" aria-hidden="true"></span>
+          </button>
+          <input type="file" id="image-input" accept="image/*" capture="environment" style="display: none;" aria-hidden="true" />
+
+          <input
+            type="text"
+            id="message-input"
+            placeholder="Escribe un mensaje..."
+            autocomplete="off"
+            maxlength="1000"
+            disabled
+            inputmode="text"
+            enterkeyhint="send"
+            aria-label="Mensaje"
+          >
+
+          <button type="button" id="voice-btn" class="btn-voice" aria-label="Grabar audio" title="Mantén presionado para grabar" aria-pressed="false">
+            <span class="btn-voice-inner" aria-hidden="true"></span>
+          </button>
+        </div>
+
         <button type="submit" id="send-btn" class="btn-send" aria-label="Enviar mensaje" disabled>
-          <svg class="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
+          <span class="btn-send-inner" aria-hidden="true"></span>
         </button>
       </form>
     </footer>
   </div>
 
-  <!-- Indicador de grabación de voz -->
-  <div id="voice-recording-indicator" class="voice-recording-indicator hidden">
+  <!-- Voice Recording Indicator -->
+  <div id="voice-recording-indicator" class="voice-recording-indicator hidden" role="status" aria-live="assertive" aria-hidden="true">
     <div class="voice-rec-inner">
-      <span class="voice-rec-dot"></span>
+      <span class="voice-rec-dot" aria-hidden="true"></span>
       <span id="voice-rec-time" class="voice-rec-time">0:00</span>
       <span class="voice-rec-hint">Suelta para enviar · Desliza para cancelar</span>
     </div>
   </div>
 
-  <!-- Modal de Ajustes -->
+  <!-- Pairing Modal (solo 2 usuarios) -->
+  <div id="pairing-modal" class="pairing-modal hidden" role="dialog" aria-modal="true" aria-label="Emparejamiento de pareja">
+    <div class="pairing-modal-content">
+      <div class="pairing-header">
+        <h2>💕 Emparejamiento</h2>
+      </div>
+      <div class="pairing-body">
+        <!-- Paso 1: Generar código (primer usuario) -->
+        <div id="pairing-step-generate" class="pairing-step">
+          <div class="pairing-icon" aria-hidden="true">🔐</div>
+          <h3>Eres el primero</h3>
+          <p>Genera un código para compartir con tu pareja.</p>
+          <button type="button" id="pairing-generate-btn" class="btn-pairing-primary">
+            <span class="btn-text">Generar código</span>
+          </button>
+        </div>
+
+        <!-- Paso 2: Mostrar código generado -->
+        <div id="pairing-step-show-code" class="pairing-step hidden">
+          <div class="pairing-icon" aria-hidden="true">📱</div>
+          <h3>Tu código de emparejamiento</h3>
+          <p>Compártelo con tu pareja (expira en 10 min)</p>
+          <div class="pairing-code-display" id="pairing-code-display" aria-live="polite"></div>
+          <button type="button" id="pairing-copy-btn" class="btn-pairing-secondary">
+            <span class="btn-text">Copiar código</span>
+          </button>
+          <p class="pairing-hint">Tu pareja debe ir a "Unirse con código" en este mismo chat.</p>
+        </div>
+
+        <!-- Paso 3: Introducir código (segundo usuario) -->
+        <div id="pairing-step-enter" class="pairing-step hidden">
+          <div class="pairing-icon" aria-hidden="true">🔑</div>
+          <h3>Unirse con código</h3>
+          <p>Introduce el código que te dio tu pareja.</p>
+          <input type="text" id="pairing-code-input" class="pairing-code-input" maxlength="6" placeholder="000000" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="numeric" aria-label="Código de emparejamiento de 6 dígitos">
+          <button type="button" id="pairing-submit-btn" class="btn-pairing-primary">
+            <span class="btn-text">Unirse</span>
+          </button>
+          <p class="pairing-error hidden" id="pairing-error" role="alert"></p>
+        </div>
+
+        <!-- Paso 4: Chat completo (3er usuario) -->
+        <div id="pairing-step-full" class="pairing-step hidden">
+          <div class="pairing-icon" aria-hidden="true">🚫</div>
+          <h3>Chat completo</h3>
+          <p>Este chat ya tiene a sus dos usuarios emparejados.</p>
+          <p class="pairing-hint">Solo pueden estar 2 personas en esta conversación privada.</p>
+        </div>
+
+        <!-- Paso 5: Emparejamiento exitoso -->
+        <div id="pairing-step-success" class="pairing-step hidden">
+          <div class="pairing-icon" aria-hidden="true">✅</div>
+          <h3>¡Emparejados!</h3>
+          <p id="pairing-success-text"></p>
+          <button type="button" id="pairing-continue-btn" class="btn-pairing-primary">
+            <span class="btn-text">Entrar al chat</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
   <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-label="Ajustes">
     <div class="settings-modal-content">
       <div class="settings-header">
-        <h2>⚙️ Ajustes</h2>
-        <button type="button" id="settings-close-btn" class="btn-icon" aria-label="Cerrar ajustes">×</button>
+        <h2>Ajustes</h2>
+        <button type="button" id="settings-close-btn" class="btn-icon" aria-label="Cerrar ajustes">
+          <span aria-hidden="true"></span>
+        </button>
       </div>
       <div class="settings-body">
-        <!-- Cambiar usuario -->
+        <!-- User Switch -->
         <div class="settings-section">
-          <h3>👤 Tu Usuario</h3>
+          <h3>Tu Usuario</h3>
           <p class="settings-desc">Cambia entre los dos perfiles fijos de la pareja.</p>
           <div class="user-switch-btns">
-            <button type="button" id="switch-user1-btn" class="btn-user-switch" data-key="user1">
-              <span class="usr-avatar">💙</span>
+            <button type="button" id="switch-user1-btn" class="btn-user-switch" data-key="user1" aria-pressed="true">
+              <span class="usr-avatar" aria-hidden="true"></span>
               <span class="usr-name">Tú</span>
             </button>
-            <button type="button" id="switch-user2-btn" class="btn-user-switch" data-key="user2">
-              <span class="usr-avatar">💗</span>
+            <button type="button" id="switch-user2-btn" class="btn-user-switch" data-key="user2" aria-pressed="false">
+              <span class="usr-avatar" aria-hidden="true"></span>
               <span class="usr-name">Mi Amor</span>
             </button>
           </div>
         </div>
-        <!-- Contador de mensajes -->
+
+        <!-- Theme Selection -->
         <div class="settings-section">
-          <h3>📊 Estadísticas</h3>
+          <h3>Apariencia</h3>
+          <p class="settings-desc">Elige el tema visual de la aplicación.</p>
+          <div class="theme-select-container">
+            <select id="theme-select" class="theme-select">
+              <option value="light">Claro</option>
+              <option value="dark">Oscuro</option>
+              <option value="system">Predeterminado del sistema</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="settings-section">
+          <h3>Estadísticas</h3>
           <div class="stats-grid">
             <div class="stat-card">
               <span class="stat-number" id="stat-total">—</span>
@@ -166,31 +290,34 @@
             </div>
           </div>
         </div>
-        <!-- Sistema -->
+
+        <!-- System Info -->
         <div class="settings-section">
-          <h3>⚡ Sistema</h3>
+          <h3>Sistema</h3>
           <p class="settings-desc">Los mensajes se respaldan en esta PC y se purgan de Firebase tras 5 días para mayor privacidad.</p>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Reaction Emoji Picker Modal -->
+  <!-- Reaction Picker Modal -->
   <div id="reaction-picker" class="reaction-picker hidden" role="dialog" aria-label="Seleccionar reacción">
     <div class="reaction-picker-content"></div>
   </div>
 
-  <!-- Modal de edición -->
-  <div id="edit-modal" class="edit-modal hidden" role="dialog" aria-modal="true">
+  <!-- Edit Modal -->
+  <div id="edit-modal" class="edit-modal hidden" role="dialog" aria-modal="true" aria-label="Editar mensaje">
     <div class="edit-modal-content">
-      <h3>✏️ Editar mensaje</h3>
-      <textarea id="edit-input" class="edit-textarea" maxlength="1000" rows="3"></textarea>
+      <h3>Editar mensaje</h3>
+      <textarea id="edit-input" class="edit-textarea" maxlength="1000" rows="3" placeholder="Edita tu mensaje..."></textarea>
       <div class="edit-modal-actions">
         <button type="button" id="edit-cancel-btn" class="btn-edit-cancel">Cancelar</button>
         <button type="button" id="edit-save-btn" class="btn-edit-save">Guardar</button>
       </div>
     </div>
   </div>
+
+  <!-- Image Lightbox (created dynamically in JS) -->
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>

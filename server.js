@@ -19,6 +19,9 @@ if (!fs.existsSync(MEDIA_DIR)) {
 
 // Firebase Admin (backup opcional)
 let dbFirestore = null;
+let pairingCache = new Map(); // uid -> { paired: boolean, expires: timestamp }
+const PAIRING_CACHE_TTL = 5 * 60 * 1000; // 5 min cache
+
 try {
   const admin = require('firebase-admin');
   const serviceAccount = require('./serviceAccountKey.json');
@@ -30,6 +33,40 @@ try {
 } catch (err) {
   console.log('ℹ️ Firebase Admin SDK no configurado (usando SyncService REST API para respaldo local y purga de 5 días)');
 }
+
+// Función para verificar emparejamiento en servidor
+async function validatePairing(uid) {
+  // Verificar cache primero
+  const cached = pairingCache.get(uid);
+  if (cached && cached.expires > Date.now()) {
+    return cached.paired;
+  }
+  
+  if (!dbFirestore) {
+    // Sin Admin SDK, permitir (validación la hace Firestore Rules)
+    return true;
+  }
+  
+  try {
+    const pairingRef = dbFirestore.collection(`rooms/general/pairing`).doc(uid);
+    const doc = await pairingRef.get();
+    const paired = doc.exists;
+    
+    pairingCache.set(uid, { paired, expires: Date.now() + PAIRING_CACHE_TTL });
+    return paired;
+  } catch (e) {
+    console.error('Error validando emparejamiento:', e);
+    return true; // En caso de error, permitir (fallback a rules)
+  }
+}
+
+// Limpiar cache periódicamente
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, data] of pairingCache.entries()) {
+    if (data.expires < now) pairingCache.delete(uid);
+  }
+}, 60000);
 
 // Servir frontend y carpeta media estática
 app.use(express.static(__dirname));
@@ -49,13 +86,61 @@ app.get('/api/sync', async (req, res) => {
   res.json(result);
 });
 
+// Health check endpoint para detección de servidor local
+app.get('/api/health', (req, res) => {
+  const db = syncService.readLocalDB();
+  const roomId = 'general';
+  const msgCount = db.rooms[roomId]?.length || 0;
+  res.json({ 
+    status: 'ok', 
+    mode: 'local', 
+    timestamp: Date.now(),
+    rooms: { [roomId]: msgCount },
+    uptime: process.uptime()
+  });
+});
+
+app.get('/api/cleanup-db', (req, res) => {
+  try {
+    const db = syncService.readLocalDB();
+    const roomId = req.query.room || 'general';
+    if (db.rooms[roomId]) {
+      db.rooms[roomId] = [];
+      syncService.writeLocalDB(db);
+    }
+    io.of('/').adapter.rooms.forEach((_, id) => {
+      if (id === roomId) {
+        io.in(id).emit('roomCleared');
+      }
+    });
+    res.json({ success: true, message: `Cleared ${roomId} local DB` });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // Socket.io real-time
 io.on('connection', (socket) => {
   console.log('✅ Nuevo usuario conectado:', socket.id);
+  let socketUid = null;
 
-  socket.on('joinRoom', async (roomId) => {
+  socket.on('joinRoom', async ({ roomId, uid }) => {
+    if (!uid) {
+      socket.emit('error', { code: 'NO_UID', message: 'UID requerido' });
+      return;
+    }
+    
+    // Validar emparejamiento
+    const isPaired = await validatePairing(uid);
+    if (!isPaired) {
+      socket.emit('error', { code: 'NOT_PAIRED', message: 'Usuario no emparejado' });
+      socket.disconnect();
+      return;
+    }
+    
+    socketUid = uid;
     socket.join(roomId);
-    console.log(`Usuario ${socket.id} se unió a la sala: ${roomId}`);
+    console.log(`Usuario ${uid} (${socket.id}) se unió a la sala: ${roomId}`);
     
     const db = syncService.readLocalDB();
     if (db.rooms[roomId] && db.rooms[roomId].length > 0) {
@@ -63,9 +148,22 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('chatMessage', (data) => {
-    const { roomId, id, ...messageData } = data;
-    if (!roomId) return;
+  socket.on('chatMessage', async (data) => {
+    const { roomId, id, uid, ...messageData } = data;
+    if (!roomId || !uid) return;
+    
+    // Validar que el UID coincide con el que hizo joinRoom
+    if (socketUid && socketUid !== uid) {
+      socket.emit('error', { code: 'UID_MISMATCH', message: 'UID no coincide' });
+      return;
+    }
+    
+    // Validar emparejamiento
+    const isPaired = await validatePairing(uid);
+    if (!isPaired) {
+      socket.emit('error', { code: 'NOT_PAIRED', message: 'Usuario no emparejado' });
+      return;
+    }
     
     const db = syncService.readLocalDB();
     if (!db.rooms[roomId]) db.rooms[roomId] = [];
@@ -74,6 +172,7 @@ io.on('connection', (socket) => {
     const newMessage = { 
       id: messageId,
       ...messageData,
+      uid: uid,
       timestamp: Date.now() 
     };
 
@@ -82,10 +181,50 @@ io.on('connection', (socket) => {
       if (localMedia) newMessage.localMediaPath = localMedia;
     }
     
-    db.rooms[roomId].push(newMessage);
+    const existingIndex = db.rooms[roomId].findIndex(m => m.id === messageId);
+    if (existingIndex >= 0) {
+      db.rooms[roomId][existingIndex] = newMessage;
+    } else {
+      db.rooms[roomId].push(newMessage);
+    }
     syncService.writeLocalDB(db);
     
     io.to(roomId).emit('newMessage', newMessage);
+  });
+
+  socket.on('typing', ({ roomId, uid, username, isTyping }) => {
+    if (!roomId || !uid) return;
+    socket.to(roomId).emit('typing', { uid, username, isTyping });
+  });
+
+  socket.on('reaction', ({ roomId, messageId, emoji, uid }) => {
+    if (!roomId || !messageId || !emoji || !uid) return;
+    io.to(roomId).emit('reaction', { messageId, emoji, uid });
+  });
+
+  socket.on('pinMessage', ({ roomId, messageId, texto, uid }) => {
+    if (!roomId || !messageId) return;
+    io.to(roomId).emit('pinMessage', { messageId, texto, uid });
+  });
+
+  socket.on('unpinMessage', ({ roomId, uid }) => {
+    if (!roomId) return;
+    io.to(roomId).emit('unpinMessage', { uid });
+  });
+
+  socket.on('deleteMessage', ({ roomId, messageId, uid }) => {
+    if (!roomId || !messageId) return;
+    io.to(roomId).emit('deleteMessage', { messageId, uid });
+  });
+
+  socket.on('editMessage', ({ roomId, messageId, texto, uid }) => {
+    if (!roomId || !messageId) return;
+    io.to(roomId).emit('editMessage', { messageId, texto, uid });
+  });
+
+  socket.on('cleanupRoom', ({ roomId }) => {
+    if (!roomId) return;
+    io.to(roomId).emit('roomCleared');
   });
 
   socket.on('disconnect', () => {

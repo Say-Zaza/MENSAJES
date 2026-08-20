@@ -253,8 +253,20 @@ async function runSyncAndPrune(roomId = "general") {
     } else {
       localDB.rooms[roomId].push(localMsg);
     }
+  }
 
-    // VERIFICACIÓN DE PURGA (5 DÍAS)
+  localDB.rooms[roomId].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  
+  // Escribir en base de datos local primero para asegurar persistencia
+  const savedSuccessfully = writeLocalDB(localDB);
+  if (!savedSuccessfully) {
+    console.error("❌ [SyncService] Fallo al escribir database.json. Se aborta la purga para evitar pérdida de datos.");
+    return { success: false, reason: "db_write_error" };
+  }
+
+  // SOLO DESPUÉS de guardar con éxito en disco, purgar de Firebase
+  for (const remoteMsg of firestoreMessages) {
+    const msgId = remoteMsg.id;
     const msgAgeMs = now - (remoteMsg.timestamp || now);
     if (msgAgeMs > FIVE_DAYS_MS) {
       console.log(`🗑️ [SyncService] Mensaje ${msgId} (Antigüedad: ${(msgAgeMs / (1000 * 3600 * 24)).toFixed(1)} días) -> Eliminando de Firebase...`);
@@ -264,9 +276,6 @@ async function runSyncAndPrune(roomId = "general") {
       }
     }
   }
-
-  localDB.rooms[roomId].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-  writeLocalDB(localDB);
 
   console.log(`✅ [SyncService] Sincronización completada con éxito:
      - Mensajes nuevos guardados localmente: ${downloadedCount}
