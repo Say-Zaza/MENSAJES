@@ -25,7 +25,15 @@ service cloud.firestore {
       allow read: if request.auth != null && isAllowedAccount(request.auth.token.email);
       allow create, update: if request.auth != null
         && slotForEmail(request.auth.token.email) == slot;
-      allow delete: if false;
+      allow delete: if request.auth != null
+        && slotForEmail(request.auth.token.email) == slot;
+    }
+
+    // Items de destacados (subcoleccion: las rules NO cascadan)
+    match /rooms/{roomId}/destacados/{slot}/items/{itemId} {
+      allow read: if request.auth != null && isAllowedAccount(request.auth.token.email);
+      allow create, update, delete: if request.auth != null
+        && slotForEmail(request.auth.token.email) == slot;
     }
 
     // Ajustes

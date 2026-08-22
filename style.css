@@ -1509,6 +1509,7 @@ body.dark-mode .message-wrapper.self .reply-text { color: rgba(255,255,255,.85);
   animation: fadeIn var(--transition-base);
 }
 .settings-modal.hidden, .edit-modal.hidden, .destacados-modal.hidden { display: none; }
+.destacados-modal { z-index: 320; }
 
 .settings-modal-content {
   background: white; border-radius: 20px 20px 0 0;

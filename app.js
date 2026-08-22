@@ -1238,7 +1238,7 @@ function showContextMenu(e, msg, isSelf) {
   if (isSelf && msg.texto && !msg.audioBase64) items.push({ label: 'Editar', action: function(){ openEditModal(msg.id, getPlainText(msg)); } });
   if (isSelf) items.push({ label: 'Eliminar', action: function(){ deleteMessage(msg.id); }, danger: true });
     items.push({ label: 'Fijar', action: function(){ pinMessage(msg.id, getPlainText(msg) || '[Mensaje]', msg.autor || ''); } });
-  if (!isSelf) items.push({ label: 'Destacar', action: function(){ toggleDestacado(msg.id); } });
+  items.push({ label: myDestacadoIds.has(msg.id) ? 'Quitar de destacados' : 'Destacar', action: function(){ toggleDestacado(msg.id); } });
   items.forEach(function(item) {
     var btn = document.createElement('button');
     btn.className = 'context-menu-item' + (item.danger ? ' danger' : '');
@@ -1568,13 +1568,17 @@ async function toggleDestacado(msgId) {
   var mySlot = getAssignedUser();
   if (!mySlot) return;
   var ref = db.collection(DESTACADOS_COLLECTION).doc(mySlot).collection('items').doc(msgId);
-  if (myDestacadoIds.has(msgId)) { ref.delete().catch(function(){}); }
+  if (myDestacadoIds.has(msgId)) {
+    ref.delete().then(function() { showSuccess('Quitado de destacados'); })
+      .catch(function() { showError('No se pudo quitar'); });
+  }
   else {
     var msg = allMessages.find(function(m){ return m.id === msgId; });
-    if (msg) {
-      var cipher = await encryptText(getPlainText(msg));
-      ref.set({ texto: cipher, imageBase64: msg.imageBase64 || null, autor: msg.autor || '', timestamp: msg.timestamp || Date.now(), createdAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(function(){});
-    }
+    if (!msg) { showError('Mensaje no encontrado'); return; }
+    var cipher = await encryptText(getPlainText(msg));
+    ref.set({ texto: cipher, imageBase64: msg.imageBase64 || null, autor: msg.autor || '', timestamp: msg.timestamp || Date.now(), createdAt: firebase.firestore.FieldValue.serverTimestamp() })
+      .then(function() { showSuccess('Agregado a destacados ⭐'); })
+      .catch(function(e) { console.error('Destacado error:', e); showError('No se pudo destacar'); });
   }
 }
 function toggleShareDestacados() {
@@ -1583,9 +1587,21 @@ function toggleShareDestacados() {
   myShareDestacados = el.shareDestacadosToggle.checked;
   db.collection(SETTINGS_COLLECTION).doc(mySlot).set({ shareDestacados: myShareDestacados }, { merge: true }).catch(function(){});
 }
+/* Sub-paneles de Ajustes (destacados / wishlist): navegación con vuelta */
+function enterSubPanel(panel) {
+  if (el.settingsModal) el.settingsModal.style.display = 'none';
+  if (panel) panel.style.display = 'flex';
+}
+function exitSubPanel(panel, backToSettings) {
+  if (panel) panel.style.display = 'none';
+  if (backToSettings !== false && el.settingsModal && currentUser) {
+    el.settingsModal.style.display = 'flex';
+  }
+}
 async function showDestacadosModal(type) {
   if (!el.destacadosModal || !el.destacadosList) return;
-  el.destacadosList.innerHTML = '';
+  enterSubPanel(el.destacadosModal);
+  el.destacadosList.innerHTML = '<p style="text-align:center;padding:20px;color:#999">Cargando…</p>';
   var title = el.destacadosModal.querySelector('.destacados-title');
   var items = type === 'my' ? myDestacados : partnerDestacados;
   if (title) title.textContent = type === 'my' ? 'Mis destacados' : 'Destacados de mi pareja';
@@ -1597,13 +1613,12 @@ async function showDestacadosModal(type) {
     resolved.forEach(function(it) {
       var card = document.createElement('div'); card.className = 'destacado-card';
       card.innerHTML = '<div class="destacado-card-text">' + escapeHtml(it.texto) + '</div><span class="destacado-card-time">' + timeAgo(it.d.timestamp) + '</span>';
-      card.addEventListener('click', function() { scrollToMessage(it.d.id); hideDestacadosModal(); });
+      card.addEventListener('click', function() { scrollToMessage(it.d.id); exitSubPanel(el.destacadosModal, false); });
       el.destacadosList.appendChild(card);
     });
   }
-  el.destacadosModal.style.display = 'flex';
 }
-function hideDestacadosModal() { if (el.destacadosModal) el.destacadosModal.style.display = 'none'; }
+function hideDestacadosModal(backToSettings) { exitSubPanel(el.destacadosModal, backToSettings); }
 function scrollToMessage(msgId) {
   var w = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
   if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); w.classList.add('highlight-flash'); setTimeout(function(){ w.classList.remove('highlight-flash'); }, 2000); }
@@ -1823,13 +1838,13 @@ document.addEventListener('DOMContentLoaded', function() {
   /* WISHLIST */
   function openWishlistModal() {
     if (!el.wishlistModal) return;
+    enterSubPanel(el.wishlistModal);
     renderWishlistList();
-    el.wishlistModal.style.display = 'flex';
-    setTimeout(function() { if (el.wishlistInput) el.wishlistInput.focus(); }, 100);
+    setTimeout(function() { if (el.wishlistInput) el.wishlistInput.focus(); }, 150);
   }
   if (el.wishlistBtn) el.wishlistBtn.addEventListener('click', openWishlistModal);
-  if (el.wishlistCloseBtn) el.wishlistCloseBtn.addEventListener('click', hideWishlistModal);
-  if (el.wishlistModal) el.wishlistModal.addEventListener('click', function(e) { if (e.target === el.wishlistModal) hideWishlistModal(); });
+  if (el.wishlistCloseBtn) el.wishlistCloseBtn.addEventListener('click', function(){ hideWishlistModal(true); });
+  if (el.wishlistModal) el.wishlistModal.addEventListener('click', function(e) { if (e.target === el.wishlistModal) hideWishlistModal(true); });
   if (el.wishlistAddBtn) el.wishlistAddBtn.addEventListener('click', addWishlistItem);
   if (el.wishlistInput) el.wishlistInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); addWishlistItem(); }
@@ -2007,7 +2022,7 @@ function deleteWishlistItem(id) {
     if (ok) db.collection(WISHLIST_COLLECTION).doc(id).delete().catch(function(){ showError('No se pudo eliminar'); });
   });
 }
-function hideWishlistModal() { if (el.wishlistModal) el.wishlistModal.style.display = 'none'; }
+function hideWishlistModal(backToSettings) { exitSubPanel(el.wishlistModal, backToSettings); }
 
 /* ============================================
    ANIVERSARIO
