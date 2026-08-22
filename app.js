@@ -1532,7 +1532,6 @@ function openSettingsModal() {
   if (el.settingsModal) el.settingsModal.style.display = 'flex';
   updateMyProfileUI(); updatePartnerProfileUI(); loadStats();
   if (el.anniversaryInput) el.anniversaryInput.value = anniversaryDate || '';
-  if (el.giphyKeyInput) el.giphyKeyInput.value = '';
   updateE2eeStatusUI();
 }
 function closeSettingsModal() { if (el.settingsModal) el.settingsModal.style.display = 'none'; }
@@ -1744,9 +1743,7 @@ document.addEventListener('DOMContentLoaded', function() {
     e2eeSaveBtn: document.getElementById('e2ee-save-btn'),
     e2eeDisableBtn: document.getElementById('e2ee-disable-btn'),
     exportTxtBtn: document.getElementById('export-txt-btn'),
-    exportPdfBtn: document.getElementById('export-pdf-btn'),
-    giphyKeyInput: document.getElementById('giphy-key-input'),
-    giphySaveBtn: document.getElementById('giphy-save-btn')
+    exportPdfBtn: document.getElementById('export-pdf-btn')
   };
 
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
@@ -1827,13 +1824,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
   /* GIFS */
   if (el.gifBtn) el.gifBtn.addEventListener('click', toggleGifPicker);
-  if (el.giphySaveBtn) el.giphySaveBtn.addEventListener('click', function() {
-    var key = el.giphyKeyInput ? el.giphyKeyInput.value.trim() : '';
-    if (!key) { showError('Pegá tu API key de GIPHY'); return; }
-    try { localStorage.setItem(GIPHY_KEY_STORAGE, key); } catch (e) {}
-    el.giphyKeyInput.value = '';
-    showSuccess('API key de GIPHY guardada');
-  });
 
   /* ANNIVERSARY */
   if (el.anniversarySaveBtn) el.anniversarySaveBtn.addEventListener('click', function() {
