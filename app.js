@@ -489,10 +489,17 @@ function startPinnedListener() {
   if (pinnedUnsubscribe) pinnedUnsubscribe();
   pinnedUnsubscribe = db.collection('rooms').doc(ROOM_ID).onSnapshot(function(doc) {
     var data = doc.data() || {};
+    var touchedIds = new Set();
+    pinnedMessages.forEach(function(p){ touchedIds.add(p.id); });
     pinnedMessages = Array.isArray(data.pinnedMessages) ? data.pinnedMessages : [];
+    pinnedMessages.forEach(function(p){ touchedIds.add(p.id); });
     anniversaryDate = typeof data.anniversary === 'string' ? data.anniversary : '';
     renderAnniversaryChip();
     renderPinnedBanner();
+    touchedIds.forEach(function(mid) {
+      var m = allMessages.find(function(x){ return x.id === mid; });
+      if (m) updateRenderedMessage(m);
+    });
   }, function(){});
 }
 async function renderPinnedBanner() {
@@ -933,6 +940,13 @@ function buildBubbleContent(msg, bubble, isSelf) {
   ts.className = 'msg-time'; ts.textContent = formatTime(msg.timestamp);
   meta.appendChild(ts);
   if (msg.editedAt) { var eb = document.createElement('span'); eb.className = 'edited-badge'; eb.textContent = ' editado'; meta.appendChild(eb); }
+  if (pinnedMessages.some(function(p){ return p.id === msg.id; })) {
+    var pb = document.createElement('span');
+    pb.className = 'msg-pin';
+    pb.title = 'Mensaje fijado';
+    pb.innerHTML = getIcon('pin');
+    meta.appendChild(pb);
+  }
   if (myDestacadoIds.has(msg.id)) {
     var stb = document.createElement('span');
     stb.className = 'msg-star';
@@ -1244,7 +1258,14 @@ function showContextMenu(e, msg, isSelf) {
   ];
   if (isSelf && msg.texto && !msg.audioBase64) items.push({ label: 'Editar', action: function(){ openEditModal(msg.id, getPlainText(msg)); } });
   if (isSelf) items.push({ label: 'Eliminar', action: function(){ deleteMessage(msg.id); }, danger: true });
-    items.push({ label: 'Fijar', action: function(){ pinMessage(msg.id, getPlainText(msg) || '[Mensaje]', msg.autor || ''); } });
+  var isPinned = pinnedMessages.some(function(p){ return p.id === msg.id; });
+  items.push({
+    label: isPinned ? 'Desfijar' : 'Fijar',
+    action: function(){
+      if (isPinned) { unpinMessage(msg.id); showSuccess('Mensaje desfijado'); }
+      else { pinMessage(msg.id, getPlainText(msg) || '[Mensaje]', msg.autor || ''); }
+    }
+  });
   items.push({ label: myDestacadoIds.has(msg.id) ? 'Quitar de destacados' : 'Destacar', action: function(){ toggleDestacado(msg.id); } });
   items.forEach(function(item) {
     var btn = document.createElement('button');
