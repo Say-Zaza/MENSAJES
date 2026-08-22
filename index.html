@@ -107,11 +107,17 @@
     <!-- Pinned Message Banner -->
     <div id="pinned-banner" class="pinned-banner hidden" role="status" aria-live="polite">
       <span class="pinned-icon" aria-hidden="true"></span>
-      <div class="pinned-content">
-        <span class="pinned-label">Mensajes fijados (<span id="pinned-count">0</span>/4)</span>
+      <div id="pinned-content" class="pinned-content">
+        <div class="pinned-header-row">
+          <span class="pinned-label">📌 Fijados (<span id="pinned-count">0</span>)</span>
+          <span id="pinned-preview" class="pinned-preview"></span>
+          <span id="pinned-chevron" class="pinned-chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+          </span>
+        </div>
         <div id="pinned-list" class="pinned-list"></div>
       </div>
-      <button type="button" id="pinned-close-btn" class="pinned-close" aria-label="Cerrar fijados">
+      <button type="button" id="pinned-close-btn" class="pinned-close" aria-label="Ocultar fijados">
         <span aria-hidden="true"></span>
       </button>
     </div>

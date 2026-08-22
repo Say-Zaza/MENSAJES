@@ -473,9 +473,18 @@ function updateHeaderBadge(partnerOnline) {
 }
 
 /* ============================================
-   PINNED MESSAGES (up to 4)
-   ============================================ */
+    PINNED MESSAGES (up to 4)
+    ============================================ */
 var pinnedMessages = [];
+var PINNED_DISMISS_KEY = 'chatpareja_pins_dismissed_' + ROOM_ID;
+var pinnedDismissedSig = null;
+try { pinnedDismissedSig = sessionStorage.getItem(PINNED_DISMISS_KEY); } catch(e){}
+function pinnedSignature() { return pinnedMessages.map(function(p){ return p.id; }).join(','); }
+function setPinnedBannerVisible(visible) {
+  if (!el.pinnedBanner) return;
+  el.pinnedBanner.classList.toggle('hidden', !visible);
+  el.pinnedBanner.style.display = visible ? 'flex' : 'none';
+}
 function startPinnedListener() {
   if (pinnedUnsubscribe) pinnedUnsubscribe();
   pinnedUnsubscribe = db.collection('rooms').doc(ROOM_ID).onSnapshot(function(doc) {
@@ -489,21 +498,21 @@ function startPinnedListener() {
 async function renderPinnedBanner() {
   var count = pinnedMessages.length;
   if (el.pinnedCount) el.pinnedCount.textContent = count;
-  if (count > 0) {
-    el.pinnedBanner.classList.remove('hidden');
-    el.pinnedBanner.style.display = 'flex';
-    el.pinnedBtn.classList.remove('hidden');
-    el.pinnedBtn.style.display = 'flex';
-  } else {
-    el.pinnedBanner.classList.add('hidden');
-    el.pinnedBanner.style.display = 'none';
-    el.pinnedBtn.classList.add('hidden');
-    el.pinnedBtn.style.display = 'none';
+  var sig = pinnedSignature();
+  if (count === 0) {
+    pinnedDismissedSig = null;
+    try { sessionStorage.removeItem(PINNED_DISMISS_KEY); } catch(e){}
+    setPinnedBannerVisible(false);
+    if (el.pinnedPreview) el.pinnedPreview.textContent = '';
+    return;
   }
-  if (!el.pinnedList) return;
+  if (sig === pinnedDismissedSig) { setPinnedBannerVisible(false); return; }
+  setPinnedBannerVisible(true);
   var resolved = await Promise.all(pinnedMessages.map(async function(p) {
     return { p: p, texto: isEncryptedText(p.texto) ? await decryptText(p.texto) : (p.texto || '[Mensaje]') };
   }));
+  if (el.pinnedPreview) el.pinnedPreview.textContent = resolved[0] ? (' ' + resolved[0].texto).substring(0, 90) : '';
+  if (!el.pinnedList) return;
   el.pinnedList.innerHTML = '';
   resolved.forEach(function(it) {
     var item = document.createElement('div');
@@ -515,6 +524,7 @@ async function renderPinnedBanner() {
     var unpinBtn = document.createElement('button');
     unpinBtn.className = 'pinned-unpin-btn';
     unpinBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    unpinBtn.setAttribute('aria-label', 'Dejar de fijar');
     unpinBtn.addEventListener('click', function(e) { e.stopPropagation(); unpinMessage(it.p.id); });
     item.appendChild(textSpan);
     item.appendChild(unpinBtn);
@@ -1635,6 +1645,8 @@ document.addEventListener('DOMContentLoaded', function() {
     voiceRecTime: document.getElementById('voice-rec-time'),
     pinnedBtn: document.getElementById('pinned-btn'),
     pinnedBanner: document.getElementById('pinned-banner'),
+    pinnedContent: document.getElementById('pinned-content'),
+    pinnedPreview: document.getElementById('pinned-preview'),
     pinnedCount: document.getElementById('pinned-count'),
     pinnedList: document.getElementById('pinned-list'),
     pinnedCloseBtn: document.getElementById('pinned-close-btn'),
@@ -1860,10 +1872,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
   /* PINNED */
   if (el.pinnedBtn) el.pinnedBtn.addEventListener('click', function() {
-    if (pinnedMessages.length > 0) scrollToMessage(pinnedMessages[0].id);
+    if (pinnedMessages.length > 0) { scrollToMessage(pinnedMessages[0].id); }
+    else if (el.pinnedBanner) setPinnedBannerVisible(false);
   });
-  if (el.pinnedCloseBtn) el.pinnedCloseBtn.addEventListener('click', function() {
-    db.collection('rooms').doc(ROOM_ID).set({ pinnedMessages: [] }, { merge: true }).catch(function(){});
+  if (el.pinnedContent) el.pinnedContent.addEventListener('click', function() {
+    if (!el.pinnedBanner || el.pinnedBanner.classList.contains('hidden')) return;
+    el.pinnedBanner.classList.toggle('expanded');
+  });
+  if (el.pinnedCloseBtn) el.pinnedCloseBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    pinnedDismissedSig = pinnedSignature();
+    try { sessionStorage.setItem(PINNED_DISMISS_KEY, pinnedDismissedSig); } catch(err){}
+    setPinnedBannerVisible(false);
   });
 
   /* SETTINGS */
