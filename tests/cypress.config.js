@@ -8,6 +8,7 @@ export default defineConfig({
     video: false,
     screenshotOnRunFailure: true,
     defaultCommandTimeout: 10000,
+    supportFile: 'cypress/support/e2e.js',
     specPattern: 'cypress/e2e/**/*.cy.{js,ts}',
     setupNodeEvents(on, config) {
       // implement node event listeners here

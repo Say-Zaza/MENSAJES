@@ -1,4 +1,4 @@
-/// <reference types="cypress" />
+﻿/// <reference types="cypress" />
 
 describe('Chat App - Critical Flows', () => {
   before(() => {
@@ -14,28 +14,29 @@ describe('Chat App - Critical Flows', () => {
     cy.waitForReady();
   });
 
-  describe('User Profile & Authentication', () => {
-    it('shows default user "Tú" on first visit', () => {
-      cy.get('#user-badge').should('contain', 'Tú');
-      cy.get('#switch-user1-btn').should('have.attr', 'aria-pressed', 'true');
-      cy.get('#switch-user2-btn').should('have.attr', 'aria-pressed', 'false');
+  describe('Login & Authentication', () => {
+    it('shows login screen and logs in with clave as "Tú"', () => {
+      cy.window().then((win) => win.auth.signOut());
+      cy.get('#login-screen', { timeout: 15000 }).should('not.have.class', 'hidden');
+      cy.readFile('sync-config.json').then((cfg) => {
+        cy.get('#login-password').type(cfg.user1Password);
+        cy.get('#login-form').submit();
+      });
+      cy.get('#user-badge', { timeout: 20000 }).should('contain', 'Tú');
+      cy.get('#login-screen').should('have.class', 'hidden');
     });
 
-    it('switches to "Mi Amor" profile', () => {
-      cy.switchUser('user2');
-      cy.get('#user-badge').should('contain', 'Mi Amor');
-      cy.get('#switch-user2-btn').should('have.attr', 'aria-pressed', 'true');
-      cy.get('#switch-user1-btn').should('have.attr', 'aria-pressed', 'false');
+    it('logs in as "Mi Amor"', () => {
+      cy.login('user2');
+      cy.get('#user-badge', { timeout: 20000 }).should('contain', 'Mi Amor');
     });
 
-    it('switches back to "Tú" profile', () => {
-      cy.switchUser('user2');
-      cy.switchUser('user1');
-      cy.get('#user-badge').should('contain', 'Tú');
-      cy.get('#switch-user1-btn').should('have.attr', 'aria-pressed', 'true');
+    it('logs in as "Tú"', () => {
+      cy.login('user1');
+      cy.get('#user-badge', { timeout: 20000 }).should('contain', 'Tú');
     });
 
-    it('switch button in settings opens and works', () => {
+    it('settings modal opens and closes', () => {
       cy.get('#settings-btn').click();
       cy.get('#settings-modal').should('not.have.class', 'hidden');
       cy.get('#theme-select').should('exist');
@@ -285,13 +286,11 @@ describe('Chat App - Critical Flows', () => {
   });
 
   describe('Persistence', () => {
-    it('remembers assigned user after reload', () => {
-      cy.switchUser('user2');
-      cy.get('#user-badge').should('contain', 'Mi Amor');
+    it('shows login screen after reload (persistence is NONE)', () => {
+      cy.waitForReady('user1');
       cy.reload();
-      cy.waitForReady();
-      cy.get('#user-badge').should('contain', 'Mi Amor');
-      cy.get('#switch-user2-btn').should('have.attr', 'aria-pressed', 'true');
+      cy.get('#login-screen', { timeout: 20000 }).should('not.have.class', 'hidden');
+      cy.get('#login-password').should('be.visible');
     });
   });
 });

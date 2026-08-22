@@ -1,7 +1,5 @@
-// ============================================
-// CONFIGURACIÓN FIREBASE
-// ============================================
-const firebaseConfig = {
+/* FIREBASE CONFIG */
+var firebaseConfig = {
   apiKey: "AIzaSyALVjHZtbEJGAx2pswt4l4h654ieGJw_tk",
   authDomain: "mensajes-31f68.firebaseapp.com",
   projectId: "mensajes-31f68",
@@ -9,2302 +7,1462 @@ const firebaseConfig = {
   messagingSenderId: "832362257221",
   appId: "1:832362257221:web:7a0115d52319375c743c2c"
 };
-
 firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const auth = firebase.auth();
+var db = firebase.firestore();
+var auth = firebase.auth();
+db.enablePersistence({ synchronizeTabs: true }).catch(function(){});
 
-db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
-  console.log('Persistencia offline:', err.code);
-});
+var ROOM_ID = 'general';
+var MESSAGES_COLLECTION = 'rooms/' + ROOM_ID + '/messages';
+var USERS_COLLECTION = 'rooms/' + ROOM_ID + '/users';
+var DESTACADOS_COLLECTION = 'rooms/' + ROOM_ID + '/destacados';
+var SETTINGS_COLLECTION = 'rooms/' + ROOM_ID + '/settings';
+var TYPING_COLLECTION = 'rooms/' + ROOM_ID + '/typing';
 
-const ROOM_ID = 'general';
-const MESSAGES_COLLECTION = `rooms/${ROOM_ID}/messages`;
-const USERS_COLLECTION = `rooms/${ROOM_ID}/users`;
-const PINNED_DOC = `rooms/${ROOM_ID}`;
-const PAIRING_COLLECTION = `rooms/${ROOM_ID}/pairing`;
-const PAIRING_CODE_KEY = `pairing_code_${ROOM_ID}`;
-const PAIRING_CODE_TTL = 10 * 60 * 1000; // 10 min
-
-// ============================================
-// ESTADO GLOBAL
-// ============================================
-let currentUser = null;
-let username = null;
-let unsubscribe = null;
-let pinnedUnsubscribe = null;
-let typingUnsubscribe = null;
-let typingTimeout = null;
-let partnerTypingTimeout = null;
-let editingMessageId = null;
-let replyToMessage = null;
-let isFirstMessage = true;
-let isOnline = navigator.onLine;
-let isHolding = false;
-let touchStartX = 0;
-let unreadCount = 0;
-
-let connectionMode = 'firebase'; // 'firebase' o 'socketio'
-let allMessages = [];
-let visibleCount = 40;
-let isScrollLoading = false;
-let presenceHeartbeatInterval = null;
-let partnerPresenceUnsubscribe = null;
-let reactionWrappers = new Map();
-
-// ============================================
-// ESTADO DE EMPAREJAMIENTO (solo 2 usuarios)
-// ============================================
-let pairingState = 'checking'; // 'checking' | 'generate' | 'show_code' | 'enter_code' | 'paired' | 'full'
-let pairingCode = null;
-let pairingCodeExpires = 0;
-let currentUserRole = null; // 'owner' | 'partner' | null
-
-const state = {
-  mediaRecorder: null,
-  audioChunks: [],
-  recordingTimer: null,
-  recordingSeconds: 0,
-  voiceCancelled: false,
-  reactionUnsubscribes: new Map(),
-  isTyping: false,
-  lastMsgTime: 0,
-  socket: null
+var ACCOUNTS = {
+  user1: { key:'user1', email:'hombre@chatpareja.app', password:'SAHIR2203', name:'Tu', color:'#2563eb' },
+  user2: { key:'user2', email:'mujer@chatpareja.app', password:'ISIS3003', name:'Mi Amor', color:'#ec4899' }
 };
 
-// ============================================
-// HELPERS GLOBALES
-// ============================================
+var REACTIONS = ['\uD83D\uDC4D','\u2764\uFE0F','\uD83D\uDE02','\uD83D\uDE2E','\uD83D\uDE22','\uD83D\uDE4F','\uD83D\uDD25'];
+var TYPING_TIMEOUT_MS = 3000;
+var PRESENCE_HEARTBEAT_MS = 30000;
+var ONLINE_THRESHOLD_MS = 60000;
+
+var currentUser = null;
+var username = null;
+var assignedKey = null;
+var unsubscribe = null;
+var pinnedUnsubscribe = null;
+var typingUnsubscribe = null;
+var typingTimeout = null;
+var partnerTypingTimeout = null;
+var editingMessageId = null;
+var replyToMessage = null;
+var isFirstMessage = true;
+var isOnline = navigator.onLine;
+var unreadCount = 0;
+var isConnected = false;
+var allMessages = [];
+var renderedMessageIds = new Set();
+var visibleCount = 40;
+var myProfile = { username:'', avatarBase64:'', bio:'' };
+var partnerProfile = { username:'', avatarBase64:'', bio:'' };
+var myDestacados = [];
+var myDestacadoIds = new Set();
+var myShareDestacados = false;
+var partnerShares = false;
+var currentPinnedId = null;
+var presenceHeartbeatInterval = null;
+var partnerPresenceUnsubscribe = null;
+var pendingImageFiles = [];
+var pendingImagePreviews = [];
+var state = {
+  mediaRecorder: null, audioChunks: [], recordingTimer: null,
+  recordingSeconds: 0, voiceCancelled: false, isTyping: false, socket: null
+};
+var el = {};
+
+/* ============================================
+   HELPERS
+   ============================================ */
 function generateClientId() {
-  return 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  return 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
 }
-
-function safeGetLocalStorage(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-function safeSetLocalStorage(key, value) {
-  try { localStorage.setItem(key, value); return true; } catch { return false; }
-}
-
 function escapeHtml(text) {
-  const d = document.createElement('div');
-  d.textContent = text;
+  var d = document.createElement('div');
+  d.appendChild(document.createTextNode(text || ''));
   return d.innerHTML;
 }
-
 function timeAgo(timestamp) {
   if (!timestamp) return '';
-  const d = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  const now = new Date();
-  const diff = Math.floor((now - d) / 1000);
-  if (diff < 60) return 'ahora';
-  if (diff < 3600) return `${Math.floor(diff/60)}m`;
-  if (diff < 86400) return `${Math.floor(diff/3600)}h`;
-  return `${Math.floor(diff/86400)}d`;
+  var ts = timestamp.toMillis ? timestamp.toMillis() : (typeof timestamp === 'number' ? timestamp : new Date(timestamp).getTime());
+  var diff = Math.max(0, Date.now() - ts);
+  var s = Math.floor(diff / 1000);
+  if (s < 30) return 'ahora';
+  var m = Math.floor(s / 60);
+  if (m < 60) return m + 'm';
+  var h = Math.floor(m / 60);
+  if (h < 24) return h + 'h';
+  return Math.floor(h / 24) + 'd';
 }
-
-// ============================================
-// FUNCIONES DE EMPAREJAMIENTO (solo 2 usuarios)
-// ============================================
-function generatePairingCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+function getIcon(name) {
+  return (typeof ICONS !== 'undefined' && ICONS[name]) ? ICONS[name] : '';
 }
-
-function savePairingCodeLocal(code) {
-  const data = { code, expires: Date.now() + PAIRING_CODE_TTL };
-  safeSetLocalStorage(PAIRING_CODE_KEY, JSON.stringify(data));
-  pairingCode = code;
-  pairingCodeExpires = data.expires;
+function renderIcon(container, name) {
+  if (container) container.innerHTML = getIcon(name);
 }
-
-function loadPairingCodeLocal() {
-  try {
-    const stored = localStorage.getItem(PAIRING_CODE_KEY);
-    if (stored) {
-      const data = JSON.parse(stored);
-      if (data.expires > Date.now()) {
-        pairingCode = data.code;
-        pairingCodeExpires = data.expires;
-        return data.code;
-      } else {
-        localStorage.removeItem(PAIRING_CODE_KEY);
-      }
-    }
-  } catch {}
+function showError(msg) {
+  var old = document.querySelector('.error-toast');
+  if (old) old.remove();
+  var t = document.createElement('div');
+  t.className = 'error-toast';
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#ef4444;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;z-index:10000';
+  document.body.appendChild(t);
+  setTimeout(function(){ t.remove(); }, 4000);
+}
+function getAssignedUser() {
+  if (!currentUser || !currentUser.email) return null;
+  if (currentUser.email === ACCOUNTS.user1.email) return 'user1';
+  if (currentUser.email === ACCOUNTS.user2.email) return 'user2';
   return null;
 }
-
-function clearPairingCodeLocal() {
-  localStorage.removeItem(PAIRING_CODE_KEY);
-  pairingCode = null;
-  pairingCodeExpires = 0;
+function getUserConfig() {
+  var k = getAssignedUser();
+  return k ? ACCOUNTS[k] : null;
 }
-
-async function checkPairingStatus(uid) {
-  try {
-    const doc = await db.collection(PAIRING_COLLECTION).doc(uid).get();
-    if (doc.exists) {
-      const data = doc.data();
-      currentUserRole = data.role || 'owner';
-      return true;
-    }
-    return false;
-  } catch (e) {
-    console.error('Error checking pairing status:', e);
-    return false;
-  }
+function getPartnerConfig() {
+  var k = getAssignedUser();
+  if (!k) return null;
+  return k === 'user1' ? ACCOUNTS.user2 : ACCOUNTS.user1;
 }
-
-async function getPairedUsersCount() {
-  try {
-    const snap = await db.collection(PAIRING_COLLECTION).get();
-    return snap.size;
-  } catch (e) {
-    console.error('Error getting paired count:', e);
-    return 2; // Asumir lleno si hay error
-  }
+function showLoginScreen() {
+  if (el.loginScreen) { el.loginScreen.style.display = 'flex'; }
+  if (el.chatContainer) { el.chatContainer.style.display = 'none'; }
 }
-
-async function createPairingAsOwner(uid) {
-  const code = generatePairingCode();
-  const batch = db.batch();
-  
-  // Crear documento del owner
-  const ownerRef = db.collection(PAIRING_COLLECTION).doc(uid);
-  batch.set(ownerRef, {
-    role: 'owner',
-    code: code,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    pairedAt: null
+function hideLoginScreen() {
+  if (el.loginScreen) { el.loginScreen.style.display = 'none'; }
+  if (el.chatContainer) { el.chatContainer.style.display = 'flex'; }
+}
+function refreshApp() {
+  var pw = el.loginPassword ? el.loginPassword.value.trim() : '';
+  if (!pw) { var matched = null; for (var k in ACCOUNTS) { if (ACCOUNTS[k].email === (currentUser && currentUser.email)) { matched = ACCOUNTS[k]; break; } }
+  if (matched) pw = matched.password; }
+  if (pw) { try { sessionStorage.setItem('chatpareja_refresh_pw', pw); } catch(e){} }
+  location.reload();
+}
+function tryAutoLogin() {
+  var pw = null;
+  try { pw = sessionStorage.getItem('chatpareja_refresh_pw'); } catch(e){}
+  if (!pw) return;
+  try { sessionStorage.removeItem('chatpareja_refresh_pw'); } catch(e){}
+  var matched = null;
+  for (var k in ACCOUNTS) { if (ACCOUNTS[k].password === pw) { matched = ACCOUNTS[k]; break; } }
+  if (!matched) return;
+  if (el.loginPassword) el.loginPassword.value = pw;
+  if (el.loginError) el.loginError.style.display = 'none';
+  if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = true; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrando...'; }
+  auth.signInWithEmailAndPassword(matched.email, matched.password).catch(function(err) {
+    console.error('Auto-login error:', err);
+    if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
   });
-  
-  await batch.commit();
-  savePairingCodeLocal(code);
-  currentUserRole = 'owner';
-  return code;
 }
-
-async function joinPairingAsPartner(uid, code) {
-  // Verificar que el código existe y pertenece al owner
-  const ownerQuery = await db.collection(PAIRING_COLLECTION).where('code', '==', code).where('role', '==', 'owner').limit(1).get();
-  
-  if (ownerQuery.empty) {
-    throw new Error('Código inválido o expirado');
-  }
-  
-  const ownerDoc = ownerQuery.docs[0];
-  const ownerUid = ownerDoc.id;
-  
-  // Verificar que no hay ya un partner
-  const partnerQuery = await db.collection(PAIRING_COLLECTION).where('role', '==', 'partner').limit(1).get();
-  if (!partnerQuery.empty) {
-    throw new Error('Este chat ya tiene pareja emparejada');
-  }
-  
-  const batch = db.batch();
-  
-  // Crear documento del partner
-  const partnerRef = db.collection(PAIRING_COLLECTION).doc(uid);
-  batch.set(partnerRef, {
-    role: 'partner',
-    ownerUid: ownerUid,
-    code: code,
-    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    pairedAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  
-  // Actualizar owner con pairedAt
-  batch.update(db.collection(PAIRING_COLLECTION).doc(ownerUid), {
-    pairedAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  
-  await batch.commit();
-  currentUserRole = 'partner';
-  return true;
-}
-
-function showPairingModal(step) {
-  const modal = document.getElementById('pairing-modal');
-  if (!modal) return;
-  
-  // Ocultar todos los pasos
-  document.querySelectorAll('.pairing-step').forEach(s => s.classList.add('hidden'));
-  
-  // Mostrar paso solicitado
-  const stepEl = document.getElementById(`pairing-step-${step}`);
-  if (stepEl) stepEl.classList.remove('hidden');
-  
-  modal.classList.remove('hidden');
-  modal.style.display = 'flex';
-}
-
 function hidePairingModal() {
-  const modal = document.getElementById('pairing-modal');
-  if (modal) {
-    modal.classList.add('hidden');
-    modal.style.display = 'none';
+  if (el.pairingModal) el.pairingModal.style.display = 'none';
+}
+function initTheme() {
+  var saved = 'system';
+  try { saved = localStorage.getItem('chatpareja_theme') || 'system'; } catch(e){}
+  setTheme(saved);
+}
+function setTheme(theme) {
+  try { localStorage.setItem('chatpareja_theme', theme); } catch(e){}
+  if (el.themeSelect) el.themeSelect.value = theme;
+  var r = document.documentElement;
+  r.removeAttribute('data-theme');
+  if (theme === 'system') {
+    r.setAttribute('data-theme', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  } else {
+    r.setAttribute('data-theme', theme);
   }
 }
 
-// ============================================
-// SISTEMA DE ICONOS
-// ============================================
-function getIcon(name) {
-  const icon = ICONS?.[name];
-  if (!icon) {
-    console.warn(`Icon "${name}" not found`);
-    return '';
-  }
-  return icon;
-}
 
-function renderIcon(container, name) {
-  if (!container) return;
-  container.innerHTML = getIcon(name);
-}
-
-// ============================================
-// ELEMENTOS DOM
-// ============================================
-const elements = {
-  messagesContainer: document.getElementById('messages-container'),
-  welcomeMessage: document.getElementById('welcome-message'),
-  chatForm: document.getElementById('chat-form'),
-  messageInput: document.getElementById('message-input'),
-  sendBtn: document.getElementById('send-btn'),
-  emojiBtn: document.getElementById('emoji-btn'),
-  emojiPicker: document.getElementById('emoji-picker'),
-imageBtn: document.getElementById('image-btn'),
-   imageInput: document.getElementById('image-input'),
-  userBadge: document.getElementById('user-badge'),
-  voiceBtn: document.getElementById('voice-btn'),
-  voiceIndicator: document.getElementById('voice-recording-indicator'),
-  voiceRecTime: document.getElementById('voice-rec-time'),
-  pinnedBtn: document.getElementById('pinned-btn'),
-  pinnedBanner: document.getElementById('pinned-banner'),
-  pinnedText: document.getElementById('pinned-text'),
-  pinnedCloseBtn: document.getElementById('pinned-close-btn'),
-  settingsBtn: document.getElementById('settings-btn'),
-  settingsModal: document.getElementById('settings-modal'),
-  settingsCloseBtn: document.getElementById('settings-close-btn'),
-  editModal: document.getElementById('edit-modal'),
-  editInput: document.getElementById('edit-input'),
-  editCancelBtn: document.getElementById('edit-cancel-btn'),
-  editSaveBtn: document.getElementById('edit-save-btn'),
-  searchToggleBtn: document.getElementById('search-toggle-btn'),
-  searchBar: document.getElementById('search-bar'),
-  searchInput: document.getElementById('search-input'),
-  searchCloseBtn: document.getElementById('search-close-btn'),
-  replyPreview: document.getElementById('reply-preview'),
-  offlineBanner: document.getElementById('offline-banner'),
-  scrollToBottomBtn: document.getElementById('scroll-to-bottom-btn'),
-  reactionPicker: document.getElementById('reaction-picker'),
-  reactionPickerContent: document.getElementById('reaction-picker')?.querySelector('.reaction-picker-content'),
-  emojiPickerInner: document.getElementById('emoji-picker'),
-  chatInputArea: document.querySelector('.chat-input-area'),
-};
-
-// Icon containers
-const iconEls = {
-  replyPreviewAuthor: null,
-  replyPreviewText: null,
-  welcomeIcon: document.querySelector('.welcome-icon'),
-  uploadIcon: document.querySelector('.drag-drop-icon'),
-  syncIcon: document.querySelector('.sync-icon'),
-};
-
-// ============================================
-// INICIALIZAR ICONOS ESTÁTICOS
-// ============================================
-function initStaticIcons() {
-  renderIcon(iconEls.welcomeIcon, 'messageCircle');
-  renderIcon(iconEls.uploadIcon, 'upload');
-
-  // Header buttons
-  const pinnedBtnInner = elements.pinnedBtn?.querySelector('.btn-icon-inner');
-  const searchBtnInner = elements.searchToggleBtn?.querySelector('.btn-icon-inner');
-  const settingsBtnInner = elements.settingsBtn?.querySelector('.btn-icon-inner');
-  const settingsCloseInner = elements.settingsCloseBtn?.querySelector('.btn-icon');
-  const emojiBtnInner = elements.emojiBtn?.querySelector('.btn-emoji-inner');
-  const imageBtnInner = elements.imageBtn?.closest('.btn-media')?.querySelector('.btn-media-inner');
-  const voiceBtnInner = elements.voiceBtn?.querySelector('.btn-voice-inner');
-  const sendBtnInner = elements.sendBtn?.querySelector('.btn-send-inner');
-  const voiceRecDot = elements.voiceIndicator?.querySelector('.voice-rec-dot');
-  const pinnedCloseIcon = elements.pinnedCloseBtn?.querySelector('span');
-  const searchCloseIcon = elements.searchCloseBtn?.querySelector('span');
-  const replyPreviewCloseIcon = elements.replyPreview?.querySelector('.reply-preview-close span');
-  const editCancelIcon = null; // will set later
-
-  if (pinnedBtnInner) renderIcon(pinnedBtnInner, 'pin');
-  if (searchBtnInner) renderIcon(searchBtnInner, 'search');
-  if (settingsBtnInner) renderIcon(settingsBtnInner, 'settings');
-  if (settingsCloseInner) renderIcon(settingsCloseInner, 'close');
-  if (emojiBtnInner) renderIcon(emojiBtnInner, 'emoji');
-  if (imageBtnInner) renderIcon(imageBtnInner, 'image');
-  if (voiceBtnInner) renderIcon(voiceBtnInner, 'mic');
-  if (sendBtnInner) renderIcon(sendBtnInner, 'send');
-  if (voiceRecDot) renderIcon(voiceRecDot, 'micOff');
-  if (pinnedCloseIcon) renderIcon(pinnedCloseIcon, 'close');
-  if (searchCloseIcon) renderIcon(searchCloseIcon, 'close');
-  if (replyPreviewCloseIcon) renderIcon(replyPreviewCloseIcon, 'close');
-
-  // User switch avatars
-  const avatar1 = document.querySelector('#switch-user1-btn .usr-avatar');
-  const avatar2 = document.querySelector('#switch-user2-btn .usr-avatar');
-  if (avatar1) renderIcon(avatar1, 'heartBlue');
-  if (avatar2) renderIcon(avatar2, 'heartPink');
-
-  // Sync badge icon
-  const syncBadgeIcon = document.querySelector('.sync-icon');
-  if (syncBadgeIcon) renderIcon(syncBadgeIcon, 'sync');
-}
-
-// ============================================
-// COLA OFFLINE
-// ============================================
-const OFFLINE_QUEUE_KEY = 'chat_offline_queue';
-
-function getOfflineQueue() {
-  try { const d = localStorage.getItem(OFFLINE_QUEUE_KEY); return d ? JSON.parse(d) : []; } catch { return []; }
-}
-function saveOfflineQueue(queue) {
-  try { localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue)); } catch {}
-}
+/* ============================================
+   OFFLINE QUEUE
+   ============================================ */
+var OFFLINE_QUEUE_KEY = 'chatpareja_offline';
+function getOfflineQueue() { try { var d = localStorage.getItem(OFFLINE_QUEUE_KEY); return d ? JSON.parse(d) : []; } catch(e){ return []; } }
+function saveOfflineQueue(q) { try { localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q)); } catch(e){} }
 function addToOfflineQueue(data) {
-  const q = getOfflineQueue();
-  q.push({ ...data, queuedAt: Date.now(), tempId: 'temp_' + Date.now() + '_' + Math.random().toString(36).substr(2,9) });
+  var q = getOfflineQueue();
+  q.push(data);
   saveOfflineQueue(q);
   updatePendingIndicator();
 }
 function updatePendingIndicator() {
-  const q = getOfflineQueue();
-  const indicator = elements.pendingIndicator || document.getElementById('pending-indicator');
-  if (!indicator) return;
-  if (q.length > 0) {
-    indicator.textContent = `${q.length} pendiente${q.length > 1 ? 's' : ''}`;
-    indicator.classList.remove('hidden');
-  } else {
-    indicator.classList.add('hidden');
-  }
+  var q = getOfflineQueue();
+  if (!el.pendingIndicator) return;
+  if (q.length > 0) { el.pendingIndicator.textContent = q.length + ' pendiente' + (q.length > 1 ? 's' : ''); el.pendingIndicator.style.display = 'inline'; }
+  else { el.pendingIndicator.style.display = 'none'; }
 }
-async function flushOfflineQueue() {
+function flushOfflineQueue() {
   if (!isOnline || !currentUser) return;
-  const queue = getOfflineQueue();
-  if (!queue.length) return;
-  const remaining = [];
-  for (const item of queue) {
-    const msgId = item.id || generateClientId();
-    const data = { ...item, id: msgId };
-    try {
-      if (connectionMode === 'socketio' && state.socket) {
-        state.socket.emit('chatMessage', { roomId: ROOM_ID, ...data });
-      } else {
-        await db.collection(MESSAGES_COLLECTION).doc(msgId).set(data);
-      }
-    } catch { remaining.push(data); }
-  }
+  var q = getOfflineQueue();
+  if (!q.length) return;
+  var remaining = [];
+  q.forEach(function(item) {
+    var msgId = item.id || generateClientId();
+    item.id = msgId;
+    db.collection(MESSAGES_COLLECTION).doc(msgId).set(item).catch(function(){ remaining.push(item); });
+  });
   saveOfflineQueue(remaining);
   updatePendingIndicator();
 }
-window.addEventListener('online', () => { isOnline = true; updateOfflineState(); flushOfflineQueue(); });
-window.addEventListener('offline', () => { isOnline = false; updateOfflineState(); });
-updatePendingIndicator();
 
-function updateOfflineState() {
-  if (!elements.offlineBanner) return;
-  if (!isOnline) {
-    elements.offlineBanner.classList.remove('hidden');
-    elements.offlineBanner.style.display = 'flex';
-  } else {
-    elements.offlineBanner.classList.add('hidden');
-  }
-}
-
-// ============================================
-// ERROR TOAST
-// ============================================
-function showError(message, isRetryable = false, onRetry = null) {
-  const el = document.createElement('div');
-  el.className = 'error-toast';
-  el.innerHTML = `<span class="error-icon">${getIcon('alert')}</span><span class="error-message">${escapeHtml(message)}</span>${isRetryable && onRetry ? '<button class="error-retry">Reintentar</button>' : ''}`;
-  if (onRetry) el.querySelector('.error-retry').addEventListener('click', () => { el.remove(); onRetry(); });
-  document.body.appendChild(el);
-  if (!isRetryable) setTimeout(() => el.remove(), 4000);
-}
-
-// ============================================
-// TYPING INDICATOR
-// ============================================
-const TYPING_COLLECTION = `rooms/${ROOM_ID}/typing`;
-
+/* ============================================
+   TYPING
+   ============================================ */
 function startTypingListener() {
   if (typingUnsubscribe) typingUnsubscribe();
-  typingUnsubscribe = db.collection(TYPING_COLLECTION).onSnapshot((snap) => {
-    snap.docChanges().forEach((change) => {
-      const d = change.doc.data();
-      if (d.uid === currentUser?.uid) return;
-      const el = document.getElementById('typing-indicator');
-      if (!el) return;
+  typingUnsubscribe = db.collection(TYPING_COLLECTION).onSnapshot(function(snap) {
+    snap.docChanges().forEach(function(change) {
+      var d = change.doc.data();
+      if (d.uid === (currentUser && currentUser.uid)) return;
+      var ind = document.getElementById('typing-indicator');
+      if (!ind) return;
       if ((change.type === 'added' || change.type === 'modified') && d.isTyping) {
-        el.innerHTML = `<span>${escapeHtml(d.username)} está escribiendo</span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>`;
-        el.classList.remove('hidden');
+        ind.innerHTML = '<span>' + escapeHtml(d.username || '') + ' escribiendo</span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+        ind.classList.remove('hidden');
+        ind.style.display = 'flex';
         clearTimeout(partnerTypingTimeout);
-        partnerTypingTimeout = setTimeout(() => {
-          el.classList.add('hidden');
-          el.innerHTML = '';
-        }, 4000);
-      } else {
-        el.classList.add('hidden');
-        el.innerHTML = '';
+        partnerTypingTimeout = setTimeout(function(){ ind.classList.add('hidden'); ind.style.display = 'none'; }, 4000);
+      } else if (change.type === 'removed' || (change.type === 'modified' && !d.isTyping)) {
+        ind.classList.add('hidden');
+        ind.style.display = 'none';
         clearTimeout(partnerTypingTimeout);
       }
     });
-  });
+    snap.forEach(function(doc) {
+      var d = doc.data();
+      if (d.uid === (currentUser && currentUser.uid)) return;
+      var ind = document.getElementById('typing-indicator');
+      if (!ind) return;
+      if (d.isTyping) {
+        ind.innerHTML = '<span>' + escapeHtml(d.username || '') + ' escribiendo</span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+        ind.classList.remove('hidden');
+        ind.style.display = 'flex';
+        clearTimeout(partnerTypingTimeout);
+        partnerTypingTimeout = setTimeout(function(){ ind.classList.add('hidden'); ind.style.display = 'none'; }, 4000);
+      }
+    });
+  }, function(err){ console.error('Typing listener error:', err); });
 }
-
 function setTypingStatus(isTyping) {
-  if (!currentUser || !username) return;
-  const ref = db.collection(TYPING_COLLECTION).doc(currentUser.uid);
-  if (isTyping) {
-    ref.set({ uid: currentUser.uid, username, isTyping: true, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-    setTimeout(() => ref.update({ isTyping: false }).catch(() => {}), 3000);
-  } else {
-    ref.update({ isTyping: false }).catch(() => {});
-  }
-}
-
-function handleTypingInput() {
   if (!currentUser) return;
-  if (!state.isTyping) {
-    state.isTyping = true;
-    setTypingStatus(true);
+  var ref = db.collection(TYPING_COLLECTION).doc(currentUser.uid);
+  if (isTyping) {
+    ref.set({ uid: currentUser.uid, username: username || '', isTyping: true, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(function(){});
+    setTimeout(function(){ ref.update({ isTyping: false }).catch(function(){}); }, TYPING_TIMEOUT_MS);
+  } else {
+    ref.update({ isTyping: false }).catch(function(){});
   }
+}
+function handleTypingInput() {
+  if (!state.isTyping) { state.isTyping = true; setTypingStatus(true); }
   clearTimeout(typingTimeout);
-  typingTimeout = setTimeout(() => { setTypingStatus(false); state.isTyping = false; }, 800);
+  typingTimeout = setTimeout(function(){ state.isTyping = false; setTypingStatus(false); }, 800);
 }
 
-// ============================================
-// TEMAS (CLARO / OSCURO / SISTEMA)
-// ============================================
-function initTheme() {
-  const savedTheme = safeGetLocalStorage('theme') || 'system';
-  const themeSelect = document.getElementById('theme-select');
-  if (themeSelect) {
-    themeSelect.value = savedTheme;
-    themeSelect.addEventListener('change', (e) => {
-      setTheme(e.target.value);
-    });
-  }
-  setTheme(savedTheme);
-}
-
-function setTheme(theme) {
-  safeSetLocalStorage('theme', theme);
-  const body = document.body;
-  if (theme === 'dark') {
-    body.classList.add('dark-mode');
-  } else if (theme === 'light') {
-    body.classList.remove('dark-mode');
-  } else {
-    const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    body.classList.toggle('dark-mode', isSystemDark);
-  }
-}
-
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-  const currentTheme = safeGetLocalStorage('theme') || 'system';
-  if (currentTheme === 'system') {
-    document.body.classList.toggle('dark-mode', e.matches);
-  }
-});
-
-// ============================================
-// HISTORIAL LOCAL Y FALLBACK SOCKET.IO
-// ============================================
-async function loadLocalHistory() {
-  try {
-    const response = await fetch(`/api/history/${ROOM_ID}`);
-    if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-    const localMsgs = await response.json();
-    
-    // Unificar mensajes locales
-    allMessages = localMsgs || [];
-    allMessages.sort((a, b) => (a.localTimestamp || a.timestamp || 0) - (b.localTimestamp || b.timestamp || 0));
-    
-    renderMessagesList();
-    console.log(`📥 [App] Historial local cargado con éxito: ${allMessages.length} mensajes.`);
-  } catch (err) {
-    console.warn("⚠️ [App] No se pudo cargar el historial local (servidor local apagado):", err.message);
-  }
-}
-
-let isConnected = false;
-
-function connectRealtime() {
-  console.log("🔌 [App] Conectando a tiempo real...");
-  
-  const firebaseTimeout = setTimeout(() => {
-    if (!isConnected) {
-      console.warn("⏳ [App] Tiempo de espera de Firebase agotado (4s). Activando fallback de Socket.io...");
-      activateSocketIOFallback();
-    }
-  }, 4000);
-
-  auth.signInAnonymously()
-    .then((user) => {
-      // Dejar que onAuthStateChanged maneje el acceso y la inicialización
-    })
-    .catch((err) => {
-      console.error("❌ [App] Error en Auth Firebase:", err.message);
-      clearTimeout(firebaseTimeout);
-      activateSocketIOFallback();
-    });
-}
-
-function activateSocketIOFallback() {
-  if (connectionMode === 'socketio') return;
-  
-  connectionMode = 'socketio';
-  isConnected = true;
-  console.warn("⚠️ [App] Modo de conexión cambiado a Socket.io.");
-  
-  if (unsubscribe) {
-    unsubscribe();
-    unsubscribe = null;
-  }
-  
-  // Si no hay mensajes cargados, cargar historial de respaldo HTTP
-  if (allMessages.length === 0) {
-    loadLocalHistory();
-  }
-  
-  if (typeof io !== 'undefined') {
-    state.socket = io(window.location.origin, {
-      reconnectionAttempts: 5,
-      reconnectionDelay: 2000
-    });
-    
-    state.socket.on('connect', () => {
-      console.log("✅ [Socket.io] Conectado al servidor local.");
-      updateSyncStatus('online', 'Local Server');
-      state.socket.emit('joinRoom', { roomId: ROOM_ID, uid: currentUser.uid });
-    });
-    
-    state.socket.on('error', (err) => {
-      console.error("❌ [Socket.io] Error del servidor:", err);
-      if (err.code === 'NOT_PAIRED' || err.code === 'NO_UID') {
-        showError('Tu sesión ha expirado. Recarga la página.', false, () => location.reload());
-      }
-    });
-    
-    state.socket.on('chatHistory', (history) => {
-      console.log(`📥 [Socket.io] Historial recibido: ${history.length} mensajes.`);
-      mergeIncomingMessages(history);
-    });
-    
-    state.socket.on('newMessage', (msg) => {
-      console.log("📥 [Socket.io] Nuevo mensaje recibido por socket:", msg);
-      mergeIncomingMessages([{ ...msg, status: 'read' }]);
-    });
-    
-    state.socket.on('disconnect', () => {
-      updateSyncStatus('offline', 'Local Server');
-    });
-    
-    state.socket.on('connect_error', (err) => {
-      updateSyncStatus('offline', 'Local Server');
-    });
-  } else {
-    showError("No se pudo conectar a Firebase ni al servidor local.");
-    updateSyncStatus('offline', 'Desconectado');
-  }
-}
-
-function updateSyncStatus(status, modeText) {
-  const badge = document.querySelector('.sync-badge');
-  const dot = document.querySelector('.sync-badge .status-dot');
-  const text = document.querySelector('.sync-badge span:last-child');
-  
-  if (!badge || !dot) return;
-  
-  if (status === 'online') {
-    dot.style.backgroundColor = 'var(--success-color)';
-    badge.title = `Conectado a ${modeText}. Sincronización activa.`;
-    if (text) text.textContent = modeText;
-  } else {
-    dot.style.backgroundColor = 'var(--danger-color)';
-    badge.title = `Sin conexión.`;
-    if (text) text.textContent = 'Sin conexión';
-  }
-}
-
-// ============================================
-// MERGE Y PROCESAMIENTO DE MENSAJES
-// ============================================
-function mergeIncomingMessages(incomingMsgs) {
-  let hasChanges = false;
-  
-  incomingMsgs.forEach(remoteMsg => {
-    const msgId = remoteMsg.id || remoteMsg.tempId;
-    if (!msgId) return;
-    
-    const existingIndex = allMessages.findIndex(m => m.id === msgId || (m.tempId && m.tempId === remoteMsg.tempId));
-    
-    const formattedMsg = {
-      ...remoteMsg,
-      id: msgId,
-      timestamp: remoteMsg.timestamp ? (remoteMsg.timestamp.toDate ? remoteMsg.timestamp.toDate().getTime() : new Date(remoteMsg.timestamp).getTime()) : Date.now(),
-      localTimestamp: remoteMsg.localTimestamp ? parseInt(remoteMsg.localTimestamp, 10) : (remoteMsg.timestamp ? (remoteMsg.timestamp.toDate ? remoteMsg.timestamp.toDate().getTime() : new Date(remoteMsg.timestamp).getTime()) : Date.now())
-    };
-    
-    if (existingIndex >= 0) {
-      allMessages[existingIndex] = {
-        ...allMessages[existingIndex],
-        ...formattedMsg
-      };
-      hasChanges = true;
-    } else {
-      allMessages.push(formattedMsg);
-      hasChanges = true;
-    }
-  });
-  
-  if (hasChanges) {
-    allMessages.sort((a, b) => (a.localTimestamp || a.timestamp || 0) - (b.localTimestamp || b.timestamp || 0));
-    renderMessagesList();
-    handleIncomingMessageStatuses(incomingMsgs);
-  }
-}
-
-function processFirestoreMessages(snapshot) {
-  const incoming = [];
-  snapshot.docChanges().forEach((change) => {
-    const docData = change.doc.data();
-    const isPending = change.doc.metadata.hasPendingWrites;
-    
-    const msg = {
-      ...docData,
-      id: change.doc.id,
-      status: isPending ? 'sending' : (docData.status || 'sent')
-    };
-    
-    if (change.type === 'added' || change.type === 'modified') {
-      incoming.push(msg);
-    } else if (change.type === 'removed') {
-      const idx = allMessages.findIndex(m => m.id === msg.id);
-      if (idx >= 0) {
-        allMessages.splice(idx, 1);
-        renderMessagesList();
-      }
-    }
-  });
-  
-  if (incoming.length > 0) {
-    mergeIncomingMessages(incoming);
-  }
-}
-
-// ============================================
-// ESTADOS DE MENSAJE (LEÍDOS / ENTREGADOS)
-// ============================================
-function handleIncomingMessageStatuses(msgs) {
-  if (connectionMode !== 'firebase' || !currentUser) return;
-  const unread = [];
-  const undelivered = [];
-  
-  msgs.forEach(msg => {
-    if (msg.uid !== currentUser.uid) {
-      if (msg.status !== 'read') {
-        if (document.hasFocus()) {
-          unread.push(msg);
-        } else if (msg.status !== 'delivered') {
-          undelivered.push(msg);
-        }
-      }
-    }
-  });
-  
-  if (unread.length > 0) markMessagesAsRead(unread);
-  if (undelivered.length > 0) markMessagesAsDelivered(undelivered);
-}
-
-async function markMessagesAsRead(messages) {
-  if (connectionMode !== 'firebase') return;
-  const batch = db.batch();
-  let count = 0;
-  messages.forEach(msg => {
-    if (msg.id && msg.uid !== currentUser?.uid && msg.status !== 'read') {
-      const ref = db.collection(MESSAGES_COLLECTION).doc(msg.id);
-      batch.update(ref, { status: 'read' });
-      count++;
-    }
-  });
-  if (count > 0) {
-    try {
-      await batch.commit();
-      console.log(`👁️ [App] Marcados ${count} mensajes como leídos.`);
-    } catch (err) {
-      console.error("Error marcando mensajes como leídos:", err);
-    }
-  }
-}
-
-async function markMessagesAsDelivered(messages) {
-  if (connectionMode !== 'firebase') return;
-  const batch = db.batch();
-  let count = 0;
-  messages.forEach(msg => {
-    if (msg.id && msg.uid !== currentUser?.uid && msg.status !== 'delivered' && msg.status !== 'read') {
-      const ref = db.collection(MESSAGES_COLLECTION).doc(msg.id);
-      batch.update(ref, { status: 'delivered' });
-      count++;
-    }
-  });
-  if (count > 0) {
-    try {
-      await batch.commit();
-      console.log(`🚚 [App] Marcados ${count} mensajes como entregados.`);
-    } catch (err) {
-      console.error("Error marcando mensajes como entregados:", err);
-    }
-  }
-}
-
-// Escuchar cambios de foco en la ventana
-window.addEventListener('focus', () => {
-  if (connectionMode === 'firebase' && currentUser) {
-    const unread = allMessages.filter(msg => msg.uid !== currentUser.uid && msg.status !== 'read');
-    if (unread.length > 0) markMessagesAsRead(unread);
-  }
-});
-
-// ============================================
-// PRESENCIA (HEARTBEAT Y LECTURA DEL PARTNER)
-// ============================================
+/* ============================================
+   PRESENCE
+   ============================================ */
 function startPresenceHeartbeat() {
-  if (presenceHeartbeatInterval) clearInterval(presenceHeartbeatInterval);
-  
-  const updatePresence = () => {
-    if (connectionMode !== 'firebase' || !currentUser) return;
-    db.collection(USERS_COLLECTION).doc(currentUser.uid).set({
-      lastActive: firebase.firestore.FieldValue.serverTimestamp(),
-      state: document.hasFocus() ? 'online' : 'away'
-    }, { merge: true }).catch(() => {});
-  };
-
-  updatePresence();
-  presenceHeartbeatInterval = setInterval(updatePresence, 20000);
+  if (!currentUser) return;
+  var ref = db.collection(USERS_COLLECTION).doc(currentUser.uid);
+  ref.set({ online: true, lastSeen: firebase.firestore.FieldValue.serverTimestamp(), uid: currentUser.uid, username: username || '' }, { merge: true }).catch(function(){});
+  presenceHeartbeatInterval = setInterval(function() {
+    ref.update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp(), online: true }).catch(function(){});
+  }, PRESENCE_HEARTBEAT_MS);
 }
-
+function stopPresenceHeartbeat() {
+  if (presenceHeartbeatInterval) { clearInterval(presenceHeartbeatInterval); presenceHeartbeatInterval = null; }
+  if (currentUser) {
+    db.collection(USERS_COLLECTION).doc(currentUser.uid).update({ online: false }).catch(function(){});
+  }
+}
 function startPartnerPresenceListener() {
-  if (partnerPresenceUnsubscribe) {
-    partnerPresenceUnsubscribe();
-    partnerPresenceUnsubscribe = null;
-  }
-  
-  if (connectionMode !== 'firebase' || !currentUser) return;
-  
-  const myCfg = getUserConfig();
-  const partnerKey = myCfg.key === 'user1' ? 'user2' : 'user1';
-  
-  partnerPresenceUnsubscribe = db.collection(USERS_COLLECTION)
-    .where('assignedKey', '==', partnerKey)
-    .limit(1)
-    .onSnapshot(snapshot => {
-      if (snapshot.empty) {
-        updatePartnerPresenceUI(null);
-        return;
-      }
-      updatePartnerPresenceUI(snapshot.docs[0].data());
-    }, err => {
-      console.warn("⚠️ [App] Error presencia partner:", err.message);
+  var partner = getPartnerConfig();
+  if (!partner) return;
+  partnerPresenceUnsubscribe = db.collection(USERS_COLLECTION).where('uid', '!=', currentUser.uid).limit(1).onSnapshot(function(snap) {
+    snap.forEach(function(doc) {
+      var d = doc.data();
+      var online = d.online === true;
+      updateHeaderBadge(online);
     });
+  }, function(){});
+}
+function updateHeaderBadge(partnerOnline) {
+  var partner = getPartnerConfig();
+  if (!partner || !el.userBadge) return;
+  var status = partnerOnline === true ? ' - en linea' : partnerOnline === false ? ' - offline' : '';
+  var pName = partnerProfile.username || partner.name;
+  el.userBadge.textContent = pName + status;
+  el.userBadge.style.color = partner.color;
 }
 
-function updatePartnerPresenceUI(partnerData) {
-  const subRow = document.querySelector('.header-sub-row');
-  let presenceEl = document.getElementById('partner-presence');
-  
-  if (!presenceEl) {
-    presenceEl = document.createElement('span');
-    presenceEl.id = 'partner-presence';
-    presenceEl.className = 'partner-presence';
-    if (subRow) {
-      subRow.insertBefore(presenceEl, document.getElementById('typing-indicator'));
-    }
-  }
-  
-  if (!partnerData || !partnerData.lastActive) {
-    presenceEl.textContent = '';
-    return;
-  }
-  
-  const lastActiveDate = partnerData.lastActive.toDate ? partnerData.lastActive.toDate() : new Date(partnerData.lastActive);
-  const now = new Date();
-  const diffSeconds = Math.floor((now - lastActiveDate) / 1000);
-  const isOnlineNow = partnerData.state === 'online' && diffSeconds < 45;
-  
-  if (isOnlineNow) {
-    presenceEl.innerHTML = `<span class="presence-dot online"></span> En línea`;
-    presenceEl.className = 'partner-presence online';
+/* ============================================
+   PINNED MESSAGES (up to 4)
+   ============================================ */
+var pinnedMessages = [];
+function startPinnedListener() {
+  if (pinnedUnsubscribe) pinnedUnsubscribe();
+  pinnedUnsubscribe = db.collection('rooms').doc(ROOM_ID).onSnapshot(function(doc) {
+    var data = doc.data();
+    pinnedMessages = (data && Array.isArray(data.pinnedMessages)) ? data.pinnedMessages : [];
+    renderPinnedBanner();
+  }, function(){});
+}
+function renderPinnedBanner() {
+  var count = pinnedMessages.length;
+  if (el.pinnedCount) el.pinnedCount.textContent = count;
+  if (count > 0) {
+    el.pinnedBanner.classList.remove('hidden');
+    el.pinnedBanner.style.display = 'flex';
+    el.pinnedBtn.classList.remove('hidden');
+    el.pinnedBtn.style.display = 'flex';
   } else {
-    presenceEl.innerHTML = `Últ. vez visto ${formatPresenceTime(lastActiveDate)}`;
-    presenceEl.className = 'partner-presence offline';
+    el.pinnedBanner.classList.add('hidden');
+    el.pinnedBanner.style.display = 'none';
+    el.pinnedBtn.classList.add('hidden');
+    el.pinnedBtn.style.display = 'none';
   }
-}
-
-function formatPresenceTime(date) {
-  const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const time = `${hours}:${minutes}`;
-  
-  if (date.toDateString() === now.toDateString()) {
-    return `hoy a las ${time}`;
-  } else if (date.toDateString() === yesterday.toDateString()) {
-    return `ayer a las ${time}`;
-  } else {
-    return `el ${date.getDate()}/${date.getMonth() + 1} a las ${time}`;
-  }
-}
-
-// ============================================
-// SEPARADORES DE FECHA Y RENDER DE HISTORIAL
-// ============================================
-function createDateSeparator(date) {
-  const el = document.createElement('div');
-  el.className = 'date-separator';
-  
-  const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  
-  let label = '';
-  if (date.toDateString() === now.toDateString()) {
-    label = 'Hoy';
-  } else if (date.toDateString() === yesterday.toDateString()) {
-    label = 'Ayer';
-  } else {
-    const options = { day: 'numeric', month: 'long', year: 'numeric' };
-    label = date.toLocaleDateString('es-ES', options);
-  }
-  
-  el.innerHTML = `<span>${label}</span>`;
-  return el;
-}
-
-// ============================================
-// USUARIOS FIJOS (PAREJA)
-// ============================================
-const FIXED_USERS = [
-  { key: 'user1', name: 'Tú', color: '#2563eb', avatar: '💙' },
-  { key: 'user2', name: 'Mi Amor', color: '#ec4899', avatar: '💗' }
-];
-
-function getAssignedUser() {
-  return safeGetLocalStorage('assigned_user') || 'user1';
-}
-function getUserConfig() {
-  return FIXED_USERS.find(u => u.key === getAssignedUser()) || FIXED_USERS[0];
-}
-
-function initializeUser() {
-  const cfg = getUserConfig();
-  username = cfg.name;
-  safeSetLocalStorage('chat_username', username);
-  elements.userBadge.innerHTML = `${getIcon('heart')} ${escapeHtml(cfg.name)}`;
-  elements.userBadge.style.color = cfg.color;
-
-  document.querySelectorAll('.btn-user-switch').forEach(btn => {
-    const isActive = btn.dataset.key === cfg.key;
-    btn.classList.toggle('active', isActive);
-    btn.setAttribute('aria-pressed', isActive);
+  if (!el.pinnedList) return;
+  el.pinnedList.innerHTML = '';
+  pinnedMessages.forEach(function(p) {
+    var item = document.createElement('div');
+    item.className = 'pinned-item';
+    var textSpan = document.createElement('span');
+    textSpan.className = 'pinned-item-text';
+    textSpan.textContent = (p.autor ? p.autor + ': ' : '') + (p.texto || '[Mensaje]');
+    textSpan.addEventListener('click', function() { scrollToMessage(p.id); });
+    var unpinBtn = document.createElement('button');
+    unpinBtn.className = 'pinned-unpin-btn';
+    unpinBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    unpinBtn.addEventListener('click', function(e) { e.stopPropagation(); unpinMessage(p.id); });
+    item.appendChild(textSpan);
+    item.appendChild(unpinBtn);
+    el.pinnedList.appendChild(item);
   });
+}
+function pinMessage(msgId, text, autor) {
+  if (pinnedMessages.length >= 4) { showError('Maximo 4 mensajes fijados'); return; }
+  if (pinnedMessages.find(function(p){ return p.id === msgId; })) { showError('Ya esta fijado'); return; }
+  var newPin = { id: msgId, texto: (text || '').substring(0, 200), autor: autor || '', pinnedAt: Date.now() };
+  var updated = pinnedMessages.concat([newPin]);
+  db.collection('rooms').doc(ROOM_ID).set({
+    pinnedMessages: updated, pinnedBy: currentUser.uid,
+    pinnedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true }).catch(function(){ showError('Error al fijar'); });
+}
+function unpinMessage(msgId) {
+  var updated = pinnedMessages.filter(function(p){ return p.id !== msgId; });
+  db.collection('rooms').doc(ROOM_ID).set({
+    pinnedMessages: updated
+  }, { merge: true }).catch(function(){});
+}
 
-  elements.messageInput.disabled = false;
-  elements.sendBtn.disabled = false;
-  elements.messageInput.focus();
 
+/* ============================================
+   AUTH + LOGIN + INIT
+   ============================================ */
+function checkUserAccess(user) {
+  if (!user) { showLoginScreen(); return; }
+  currentUser = user;
+  hideLoginScreen();
+  hidePairingModal();
+  initializeUser();
+}
+function initializeUser() {
+  var cfg = getUserConfig();
+  if (!cfg) return;
+  username = cfg.name;
+  assignedKey = cfg.key;
+  updateHeaderBadge(null);
+  if (el.messageInput) el.messageInput.disabled = false;
+  if (el.sendBtn) el.sendBtn.disabled = false;
   startMessagesListener();
   startTypingListener();
   startPinnedListener();
+  startPresenceHeartbeat();
+  startPartnerPresenceListener();
+  loadMyProfile();
+  loadPartnerProfile();
+  updateHeaderPartnerAvatar();
+  startDestacadosListeners();
+  startPartnerShareSettingListener();
   if (isOnline) flushOfflineQueue();
-
-  db.collection(USERS_COLLECTION).doc(currentUser.uid).set({
-    username, assignedKey: cfg.key, color: cfg.color,
-    lastActive: firebase.firestore.FieldValue.serverTimestamp()
-  }, { merge: true });
+}
+function cleanupListeners() {
+  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
+  if (pinnedUnsubscribe) { pinnedUnsubscribe(); pinnedUnsubscribe = null; }
+  if (partnerPresenceUnsubscribe) { partnerPresenceUnsubscribe(); partnerPresenceUnsubscribe = null; }
+  stopPresenceHeartbeat();
 }
 
-async function checkUserAccess(user) {
-  if (!user) {
-    elements.userBadge.textContent = 'Desconectado';
-    elements.messageInput.disabled = true;
-    elements.sendBtn.disabled = true;
-    return;
-  }
-  
-  currentUser = user;
-  
-  // Verificar si el usuario ya está emparejado
-  const isPaired = await checkPairingStatus(user.uid);
-  
-  if (isPaired) {
-    // Usuario ya emparejado → iniciar chat normal
-    hidePairingModal();
-    initializeUser();
-    return;
-  }
-  
-  // Usuario NO emparejado → verificar cupo
-  const pairedCount = await getPairedUsersCount();
-  
-  if (pairedCount >= 2) {
-    // Chat lleno
-    pairingState = 'full';
-    showPairingModal('full');
-    elements.messageInput.disabled = true;
-    elements.sendBtn.disabled = true;
-    elements.userBadge.textContent = 'Chat completo';
-    return;
-  }
-  
-  // Hay cupo → verificar si tiene código guardado localmente
-  const savedCode = loadPairingCodeLocal();
-  
-  if (savedCode) {
-    // Tiene código guardado → es el owner, mostrar código
-    pairingState = 'show_code';
-    showPairingModal('show_code');
-    document.getElementById('pairing-code-display').textContent = savedCode;
-    elements.messageInput.disabled = true;
-    elements.sendBtn.disabled = true;
-    elements.userBadge.textContent = 'Esperando a tu pareja...';
-    return;
-  }
-  
-  // No tiene código → primer usuario, mostrar botón generar
-  pairingState = 'generate';
-  showPairingModal('generate');
-  elements.messageInput.disabled = true;
-  elements.sendBtn.disabled = true;
-  elements.userBadge.textContent = 'Configurando...';
-}
-
-// User switch buttons
-document.getElementById('switch-user1-btn').addEventListener('click', () => switchUser('user1'));
-document.getElementById('switch-user2-btn').addEventListener('click', () => switchUser('user2'));
-
-function switchUser(key) {
-  safeSetLocalStorage('assigned_user', key);
-  location.reload();
-}
-
-// ============================================
-// EMPAREJAMIENTO MODAL - Event Listeners
-// ============================================
-document.getElementById('pairing-generate-btn')?.addEventListener('click', async () => {
-  const btn = document.getElementById('pairing-generate-btn');
-  btn.disabled = true;
-  btn.querySelector('.btn-text').textContent = 'Generando...';
-  
-  try {
-    const code = await createPairingAsOwner(currentUser.uid);
-    pairingState = 'show_code';
-    showPairingModal('show_code');
-    document.getElementById('pairing-code-display').textContent = code;
-    btn.disabled = false;
-    btn.querySelector('.btn-text').textContent = 'Generar código';
-    elements.userBadge.textContent = 'Esperando a tu pareja...';
-  } catch (e) {
-    console.error('Error generando código:', e);
-    btn.disabled = false;
-    btn.querySelector('.btn-text').textContent = 'Generar código';
-    showError('Error al generar código. Intenta de nuevo.');
-  }
-});
-
-document.getElementById('pairing-copy-btn')?.addEventListener('click', () => {
-  const code = document.getElementById('pairing-code-display').textContent;
-  navigator.clipboard.writeText(code).then(() => {
-    const btn = document.getElementById('pairing-copy-btn');
-    const original = btn.querySelector('.btn-text').textContent;
-    btn.querySelector('.btn-text').textContent = '¡Copiado!';
-    setTimeout(() => btn.querySelector('.btn-text').textContent = original, 2000);
-  });
-});
-
-document.getElementById('pairing-submit-btn')?.addEventListener('click', async () => {
-  const input = document.getElementById('pairing-code-input');
-  const code = input.value.trim();
-  const errorEl = document.getElementById('pairing-error');
-  const btn = document.getElementById('pairing-submit-btn');
-  
-  if (code.length !== 6 || !/^\d{6}$/.test(code)) {
-    errorEl.textContent = 'El código debe tener 6 dígitos';
-    errorEl.classList.remove('hidden');
-    input.focus();
-    return;
-  }
-  
-  errorEl.classList.add('hidden');
-  btn.disabled = true;
-  btn.querySelector('.btn-text').textContent = 'Uniendo...';
-  
-  try {
-    await joinPairingAsPartner(currentUser.uid, code);
-    pairingState = 'paired';
-    showPairingModal('success');
-    document.getElementById('pairing-success-text').textContent = 'Ya pueden chatear juntos 💕';
-    btn.disabled = false;
-    btn.querySelector('.btn-text').textContent = 'Unirse';
-    input.value = '';
-  } catch (e) {
-    console.error('Error uniendo:', e);
-    errorEl.textContent = e.message || 'Código inválido o expirado';
-    errorEl.classList.remove('hidden');
-    btn.disabled = false;
-    btn.querySelector('.btn-text').textContent = 'Unirse';
-    input.focus();
-  }
-});
-
-document.getElementById('pairing-continue-btn')?.addEventListener('click', () => {
-  hidePairingModal();
-  initializeUser();
-});
-
-document.getElementById('pairing-code-input')?.addEventListener('input', (e) => {
-  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
-  document.getElementById('pairing-error')?.classList.add('hidden');
-});
-
-// ============================================
-// AJUSTES MODAL
-// ============================================
-elements.settingsBtn.addEventListener('click', () => {
-  elements.settingsModal.classList.remove('hidden');
-  loadStats();
-});
-elements.settingsCloseBtn.addEventListener('click', () => elements.settingsModal.classList.add('hidden'));
-elements.settingsModal.addEventListener('click', (e) => { if (e.target === elements.settingsModal) elements.settingsModal.classList.add('hidden'); });
-
-async function loadStats() {
-  try {
-    const snap = await db.collection(MESSAGES_COLLECTION).get();
-    let total = 0, mine = 0, partner = 0, images = 0, audios = 0;
-    const myUid = currentUser?.uid;
-    snap.forEach(doc => {
-      const d = doc.data();
-      total++;
-      if (d.uid === myUid) mine++; else partner++;
-      if (d.imageBase64 || d.imageUrl) images++;
-      if (d.audioBase64) audios++;
-    });
-    document.getElementById('stat-total').textContent = total;
-    document.getElementById('stat-mine').textContent = mine;
-    document.getElementById('stat-partner').textContent = partner;
-    document.getElementById('stat-images').textContent = images;
-    document.getElementById('stat-audios').textContent = audios;
-  } catch(e) {
-    console.error('Error cargando stats:', e);
-  }
-}
-
-// ============================================
-// MENSAJES FIJADOS
-// ============================================
-function startPinnedListener() {
-  if (pinnedUnsubscribe) pinnedUnsubscribe();
-  pinnedUnsubscribe = db.doc(PINNED_DOC).onSnapshot((snap) => {
-    if (!snap.exists) return;
-    const data = snap.data();
-    const pinned = data?.pinnedMessage;
-    if (pinned && pinned.texto) {
-      elements.pinnedText.textContent = pinned.texto.substring(0, 80) + (pinned.texto.length > 80 ? '...' : '');
-      elements.pinnedBanner.classList.remove('hidden');
-      elements.pinnedBanner.style.display = 'flex';
-      elements.pinnedBtn.classList.remove('hidden');
-    } else {
-      elements.pinnedBanner.classList.add('hidden');
-      elements.pinnedBanner.style.display = 'none';
-      elements.pinnedBtn.classList.add('hidden');
-    }
-  }, () => {});
-}
-
-elements.pinnedCloseBtn.addEventListener('click', () => { elements.pinnedBanner.classList.add('hidden'); elements.pinnedBanner.style.display = 'none'; });
-elements.pinnedBtn.addEventListener('click', () => { elements.pinnedBanner.classList.toggle('hidden'); elements.pinnedBanner.style.display = elements.pinnedBanner.classList.contains('hidden') ? 'none' : 'flex'; });
-
-async function pinMessage(msgId, texto) {
-  try {
-    await db.doc(PINNED_DOC).set({ pinnedMessage: { id: msgId, texto, pinnedBy: username, pinnedAt: firebase.firestore.FieldValue.serverTimestamp() } }, { merge: true });
-  } catch(e) { showError('No se pudo fijar el mensaje'); }
-}
-
-async function unpinMessage() {
-  try {
-    await db.doc(PINNED_DOC).set({ pinnedMessage: null }, { merge: true });
-  } catch(e) { showError('No se pudo desfijar el mensaje'); }
-}
-
-// ============================================
-// REPLY PREVIEW
-// ============================================
-function setReplyPreview(msg) {
-  replyToMessage = { id: msg.id, autor: msg.autor, texto: msg.texto || '', imageSrc: msg.imageBase64 || msg.imageUrl || null };
-  let html = `<span class="reply-preview-author">${escapeHtml(msg.autor)}</span>`;
-  if (replyToMessage.imageSrc) html += `<span class="reply-preview-text">📷 Imagen</span>`;
-  else if (msg.audioBase64) html += `<span class="reply-preview-text">🎙️ Audio</span>`;
-  else if (replyToMessage.texto) html += `<span class="reply-preview-text">${escapeHtml(replyToMessage.texto).substring(0,50)}${replyToMessage.texto.length > 50 ? '...' : ''}</span>`;
-  elements.replyPreview.querySelector('.reply-preview-content').innerHTML = html;
-  elements.replyPreview.classList.remove('hidden');
-  elements.replyPreview.style.display = 'flex';
-  elements.messageInput.focus();
-}
-
-function clearReplyPreview() {
-  replyToMessage = null;
-  elements.replyPreview.classList.add('hidden');
-  elements.replyPreview.style.display = 'none';
-}
-
-const replyPreviewCloseBtn = document.querySelector('.reply-preview-close');
-if (replyPreviewCloseBtn) {
-  replyPreviewCloseBtn.addEventListener('click', () => {
-    clearReplyPreview();
-    elements.messageInput.focus();
+/* ============================================
+   IMAGE COMPRESSION
+   ============================================ */
+function compressImageToBase64(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var img = new Image();
+      img.onload = function() {
+        var MAX = 800, w = img.width, h = img.height;
+        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        var base64 = c.toDataURL('image/jpeg', 0.7);
+        var blur = document.createElement('canvas');
+        blur.width = 40; blur.height = Math.round(40 * h / w);
+        blur.getContext('2d').drawImage(img, 0, 0, blur.width, blur.height);
+        resolve({ base64: base64, blurPlaceholder: blur.toDataURL('image/jpeg', 0.3), width: w, height: h, name: file.name });
+      };
+      img.onerror = function(){ reject(new Error('Error loading image')); };
+      img.src = e.target.result;
+    };
+    reader.onerror = function(){ reject(new Error('Error reading file')); };
+    reader.readAsDataURL(file);
   });
 }
 
-// ============================================
-// EDITAR MENSAJE
-// ============================================
-elements.editCancelBtn.addEventListener('click', () => {
-  elements.editModal.classList.add('hidden');
-  editingMessageId = null;
-});
-elements.editModal.addEventListener('click', (e) => { if (e.target === elements.editModal) { elements.editModal.classList.add('hidden'); editingMessageId = null; } });
 
-elements.editSaveBtn.addEventListener('click', async () => {
-  const newText = elements.editInput.value.trim();
-  if (!newText || !editingMessageId) return;
-  try {
-    await db.collection(MESSAGES_COLLECTION).doc(editingMessageId).update({
-      texto: newText,
-      editedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    elements.editModal.classList.add('hidden');
-    editingMessageId = null;
-  } catch(e) { showError('Error al editar el mensaje'); }
-});
-
-function openEditModal(msgId, currentText) {
-  editingMessageId = msgId;
-  elements.editInput.value = currentText;
-  elements.editModal.classList.remove('hidden');
-  elements.editModal.style.display = 'flex';
-  elements.editInput.focus();
-}
-
-async function deleteMessage(msgId) {
-  const confirmed = await showConfirmDialog('¿Eliminar este mensaje?');
-  if (!confirmed) return;
-  try {
-    await db.collection(MESSAGES_COLLECTION).doc(msgId).delete();
-  } catch(e) { showError('Error al eliminar el mensaje'); }
-}
-
-// Custom confirm dialog
-function showConfirmDialog(message) {
-  return new Promise((resolve) => {
-    const modal = document.createElement('div');
-    modal.className = 'custom-confirm';
-    modal.innerHTML = `
-      <div class="custom-confirm-bg"></div>
-      <div class="custom-confirm-content">
-        <p class="custom-confirm-text">${escapeHtml(message)}</p>
-        <div class="custom-confirm-btns">
-          <button type="button" class="custom-confirm-cancel">Cancelar</button>
-          <button type="button" class="custom-confirm-ok">Confirmar</button>
-        </div>
-      </div>
-    `;
-    modal.querySelector('.custom-confirm-cancel').addEventListener('click', () => { document.body.removeChild(modal); resolve(false); });
-    modal.querySelector('.custom-confirm-ok').addEventListener('click', () => { document.body.removeChild(modal); resolve(true); });
-    document.body.appendChild(modal);
-  });
-}
-
-// ============================================
-// AUTENTICACIÓN ANÓNIMA
-// ============================================
-auth.signInAnonymously().catch((err) => {
-  console.error('Error auth:', err);
-  elements.userBadge.textContent = `Error: ${err.code}`;
-});
-
-auth.onAuthStateChanged((user) => {
-  checkUserAccess(user);
-});
-
-// Iniciar conexión en tiempo real (con fallback a Socket.io a los 4s)
-connectRealtime();
-
-// ============================================
-// LISTENER TIEMPO REAL FIRESTORE
-// ============================================
+/* ============================================
+   MESSAGES LISTENER
+   ============================================ */
 function startMessagesListener() {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
-
-  const q = db.collection(MESSAGES_COLLECTION).orderBy('timestamp', 'asc');
-
-  unsubscribe = q.onSnapshot((snapshot) => {
-    if (!isConnected) {
-      isConnected = true;
-      connectionMode = 'firebase';
-      updateSyncStatus('online', 'Firebase');
-      console.log("🔥 [App] Conectado a Firebase Firestore en tiempo real.");
-    }
-    
+  unsubscribe = db.collection(MESSAGES_COLLECTION).orderBy('timestamp', 'asc').limit(500).onSnapshot(function(snapshot) {
+    if (!isConnected) isConnected = true;
     processFirestoreMessages(snapshot);
-  }, (err) => {
-    console.error('Error en listener de Firestore:', err);
-    if (!isConnected || (err.message && (err.message.includes('429') || err.message.includes('RESOURCE_EXHAUSTED') || err.message.includes('Quota exceeded')))) {
-      activateSocketIOFallback();
+  }, function(err) {
+    console.error('Messages error:', err);
+    isConnected = false;
+  });
+}
+function processFirestoreMessages(snapshot) {
+  var incoming = [];
+  var hasRemovals = false;
+  snapshot.docChanges().forEach(function(change) {
+    var docData = change.doc.data();
+    var isPending = change.doc.metadata.hasPendingWrites;
+    var msg = Object.assign({}, docData, { id: change.doc.id, status: isPending ? 'sending' : (docData.status || 'sent') });
+    if (change.type === 'added' || change.type === 'modified') { incoming.push(msg); }
+    else if (change.type === 'removed') {
+      var idx = allMessages.findIndex(function(m){ return m.id === msg.id; });
+      if (idx >= 0) { allMessages.splice(idx, 1); hasRemovals = true; }
+    }
+  });
+  if (hasRemovals) renderMessagesList();
+  if (incoming.length > 0) mergeIncomingMessages(incoming);
+}
+function mergeIncomingMessages(incomingMsgs) {
+  var hasChanges = false;
+  incomingMsgs.forEach(function(remoteMsg) {
+    var msgId = remoteMsg.id;
+    if (!msgId) return;
+    var ts = remoteMsg.timestamp;
+    var numTs = ts ? (ts.toMillis ? ts.toMillis() : new Date(ts).getTime()) : Date.now();
+    var formatted = Object.assign({}, remoteMsg, { id: msgId, timestamp: numTs });
+    var existing = allMessages.findIndex(function(m){ return m.id === msgId; });
+    if (existing >= 0) { allMessages[existing] = Object.assign({}, allMessages[existing], formatted); }
+    else { allMessages.push(formatted); }
+    hasChanges = true;
+  });
+  if (hasChanges) {
+    allMessages.sort(function(a, b){ return (a.timestamp || 0) - (b.timestamp || 0); });
+    applyIncrementalUpdates(incomingMsgs);
+    handleIncomingMessageStatuses(incomingMsgs);
+  }
+}
+function applyIncrementalUpdates(incomingMsgs) {
+  if (!el.messagesContainer) return;
+  var wasAtBottom = isUserAtBottom();
+  incomingMsgs.forEach(function(incomingMsg) {
+    var msg = allMessages.find(function(m){ return m.id === incomingMsg.id; }) || incomingMsg;
+    var existingEl = el.messagesContainer.querySelector('[data-msg-id="' + msg.id + '"]');
+    if (existingEl) { updateRenderedMessage(msg); }
+    else {
+      var isSelf = msg.uid === (currentUser && currentUser.uid);
+      if (!isSelf && !wasAtBottom) unreadCount++;
+      var ts = msg.timestamp || 0;
+      var lastId = Array.from(renderedMessageIds).pop();
+      var lastMsg = allMessages.find(function(m){ return m.id === lastId; });
+      var lastTs = lastMsg ? (lastMsg.timestamp || 0) : 0;
+      var lastUid = lastMsg ? lastMsg.uid : null;
+      var isGrouped = lastUid === msg.uid && ts - lastTs < 120000;
+      var wrapper = createMessageElement(msg, isSelf, isGrouped);
+      el.messagesContainer.appendChild(wrapper);
+      renderedMessageIds.add(msg.id);
+    }
+  });
+  refreshDateSeparators();
+  if (wasAtBottom) { el.messagesContainer.scrollTop = el.messagesContainer.scrollHeight; unreadCount = 0; updateScrollButton(); }
+  else { updateScrollButton(); }
+}
+function handleIncomingMessageStatuses(msgs) {
+  if (!currentUser) return;
+  msgs.forEach(function(msg) {
+    if (msg.uid !== currentUser.uid && msg.status !== 'read') {
+      db.collection(MESSAGES_COLLECTION).doc(msg.id).update({ status: 'read' }).catch(function(){});
     }
   });
 }
-
-// ============================================
-// SCROLL MANAGEMENT
-// ============================================
-function isUserAtBottom() {
-  if (!elements.messagesContainer) return true;
-  const { scrollTop, scrollHeight, clientHeight } = elements.messagesContainer;
-  return scrollHeight - scrollTop - clientHeight < 50;
-}
-
-function scrollToBottom() {
-  if (!elements.messagesContainer) return;
-  elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
-  unreadCount = 0;
+function renderMessagesList() {
+  if (!el.messagesContainer) return;
+  var wasAtBottom = isUserAtBottom();
+  el.messagesContainer.querySelectorAll('.message-wrapper, .date-separator').forEach(function(e){ e.remove(); });
+  renderedMessageIds = new Set();
+  if (el.welcomeMessage && allMessages.length > 0) el.welcomeMessage.remove();
+  var msgs = allMessages.slice(-visibleCount);
+  var lastDateStr = null, lastUid = null, lastTs = 0;
+  msgs.forEach(function(msg) {
+    var isSelf = msg.uid === (currentUser && currentUser.uid);
+    var ts = msg.timestamp || 0;
+    var d = new Date(ts);
+    var ds = d.toDateString();
+    if (ds !== lastDateStr) {
+      el.messagesContainer.appendChild(createDateSeparator(d));
+      lastDateStr = ds; lastUid = null; lastTs = 0;
+    }
+    var isGrouped = lastUid === msg.uid && ts - lastTs < 120000;
+    lastUid = msg.uid; lastTs = ts;
+    var wrapper = createMessageElement(msg, isSelf, isGrouped);
+    el.messagesContainer.appendChild(wrapper);
+    renderedMessageIds.add(msg.id);
+  });
+  if (wasAtBottom) el.messagesContainer.scrollTop = el.messagesContainer.scrollHeight;
   updateScrollButton();
 }
 
-const scrollBtn = elements.scrollToBottomBtn;
-if (scrollBtn) {
-  scrollBtn.addEventListener('click', scrollToBottom);
+
+/* MESSAGE RENDERING */
+function formatTime(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
-
-let scrollThrottle = null;
-if (elements.messagesContainer) {
-  elements.messagesContainer.addEventListener('scroll', () => {
-    if (scrollThrottle) return;
-    scrollThrottle = setTimeout(() => {
-      updateScrollVisibility();
-      scrollThrottle = null;
-    }, 100);
-  });
+function createDateSeparator(date) {
+  var sep = document.createElement('div');
+  sep.className = 'date-separator';
+  var today = new Date();
+  var text = '';
+  if (date.toDateString() === today.toDateString()) text = 'Hoy';
+  else { var y = new Date(today); y.setDate(y.getDate()-1); text = date.toDateString() === y.toDateString() ? 'Ayer' : date.toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'}); }
+  sep.innerHTML = '<span>' + text + '</span>';
+  return sep;
 }
-
-function updateScrollButton() {
-  if (!scrollBtn) return;
-  const isAtBottom = isUserAtBottom();
-
-  if (unreadCount > 0 && !isAtBottom) {
-    scrollBtn.classList.remove('hidden');
-    scrollBtn.style.display = 'inline-flex';
-    const countEl = scrollBtn.querySelector('.scroll-count');
-    if (countEl) countEl.textContent = unreadCount > 9 ? '9+' : unreadCount;
-  } else {
-    scrollBtn.classList.add('hidden');
-    scrollBtn.style.display = 'none';
+function createMessageElement(msg, isSelf, isGrouped) {
+  var id = msg.id, ts = msg.timestamp || 0;
+  var wrapper = document.createElement('div');
+  wrapper.className = 'message-wrapper ' + (isSelf ? 'self' : 'other') + (isGrouped ? ' grouped' : '');
+  wrapper.dataset.msgId = id;
+  wrapper.dataset.messageTime = String(ts);
+  if (!isSelf && !isGrouped) {
+    var ae = document.createElement('span');
+    ae.className = 'message-meta-author';
+    ae.textContent = msg.autor || '';
+    wrapper.appendChild(ae);
   }
+  var msgDiv = document.createElement('div');
+  msgDiv.className = 'message ' + (isSelf ? 'owner-mine' : 'owner-partner');
+  msgDiv.dataset.id = id;
+  var bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+  buildBubbleContent(msg, bubble, isSelf);
+  var replyBtn = document.createElement('button');
+  replyBtn.className = 'swipe-reply-btn';
+  replyBtn.innerHTML = getIcon('reply');
+  replyBtn.addEventListener('click', function(e) { e.stopPropagation(); setReplyPreview(msg); });
+  wrapper.appendChild(replyBtn);
+  wrapper.addEventListener('contextmenu', function(e) { e.preventDefault(); showContextMenu(e, msg, isSelf); });
+  msgDiv.appendChild(bubble);
+  wrapper.appendChild(msgDiv);
+  return wrapper;
 }
 
-function updateScrollVisibility() {
-  const isAtBottom = isUserAtBottom();
-  if (isAtBottom) {
-    unreadCount = 0;
-    scrollBtn.classList.add('hidden');
-    scrollBtn.style.display = 'none';
-  }
-}
-
-// ============================================
-// ENVIAR MENSAJE
-// ============================================
-elements.chatForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const text = elements.messageInput.value.trim();
-  if (!text || !currentUser) return;
-
-  elements.messageInput.value = '';
-  const currentReply = replyToMessage;
-  clearReplyPreview();
-  elements.messageInput.focus();
-
-  const msgId = generateClientId();
-  const data = {
-    id: msgId,
-    texto: text,
-    autor: username,
-    uid: currentUser.uid,
-    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-    localTimestamp: Date.now(),
-    reactions: {}
-  };
-  if (currentReply) data.replyTo = { id: currentReply.id, autor: currentReply.autor, texto: currentReply.texto, imageSrc: currentReply.imageSrc };
-
-  const optimisticMsg = {
-    ...data,
-    id: msgId,
-    status: 'sending',
-    uid: currentUser.uid,
-    timestamp: Date.now(),
-    localTimestamp: data.localTimestamp
-  };
-  mergeIncomingMessages([optimisticMsg]);
-
-  try {
-    if (connectionMode === 'socketio' && state.socket) {
-      state.socket.emit('chatMessage', { roomId: ROOM_ID, ...data });
-    } else if (isOnline) {
-      await db.collection(MESSAGES_COLLECTION).doc(msgId).set(data);
-    } else {
-      addToOfflineQueue(data);
-    }
-  } catch(err) {
-    const isQuotaExceeded = err.code === 'resource-exhausted' ||
-      (err.message && (err.message.includes('429') || err.message.includes('RESOURCE_EXHAUSTED') || err.message.includes('Quota exceeded')));
-    if (isQuotaExceeded) {
-      console.warn('⚠️ [App] Firestore quota exceeded, forcing Socket.io fallback');
-      activateSocketIOFallback();
-      if (state.socket) {
-        state.socket.emit('chatMessage', { roomId: ROOM_ID, ...data });
-      }
-    } else {
-      addToOfflineQueue(data);
-    }
-  }
-});
-
-// ============================================
-// RENDERIZAR MENSAJE
-// ============================================
-function formatTime(timestamp) {
-  if (!timestamp) return '--:--';
-  const d = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-  const now = new Date();
-  const diffMs = now - d;
-  if (diffMs < 60000) return 'Ahora';
-  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-}
 
 function buildBubbleContent(msg, bubble, isSelf) {
-  const { texto, imageBase64, imageUrl, imageBlur, imageWidth, imageHeight, audioBase64, replyTo, reactions, id, editedAt } = msg;
-  const imageSrc = imageBase64 || imageUrl;
-
-  // Reply preview
-  if (replyTo) {
-    const replyEl = document.createElement('div');
-    replyEl.className = 'message-reply';
-    let html = `<span class="reply-author">${escapeHtml(replyTo.autor)}</span>`;
-    if (replyTo.imageSrc) html += `<span class="reply-text">📷 Imagen</span>`;
-    else if (replyTo.texto) html += `<span class="reply-text">${escapeHtml(replyTo.texto).substring(0,60)}${replyTo.texto.length > 60 ? '...' : ''}</span>`;
-    replyEl.innerHTML = html;
-    bubble.appendChild(replyEl);
+  if (msg.replyTo) {
+    var re = document.createElement('div');
+    re.className = 'message-reply';
+    var rt = msg.replyTo.texto ? msg.replyTo.texto.substring(0, 60) : (msg.replyTo.imageSrc ? 'Imagen' : '');
+    re.innerHTML = '<span class="reply-author">' + escapeHtml(msg.replyTo.autor || '') + '</span><span class="reply-text">' + escapeHtml(rt) + '</span>';
+    bubble.appendChild(re);
   }
-
-  // Imagen
-  if (imageSrc) {
-    const imgWrapper = document.createElement('div');
-    imgWrapper.className = 'message-image-wrapper';
-    if (imageWidth && imageHeight) imgWrapper.style.aspectRatio = `${imageWidth} / ${imageHeight}`;
-
-    if (imageBlur) {
-      const bimg = document.createElement('img');
-      bimg.src = imageBlur; bimg.alt = ''; bimg.className = 'message-image-blur'; bimg.loading = 'lazy';
-      imgWrapper.appendChild(bimg);
-    }
-    const img = document.createElement('img');
-    img.src = imageSrc; img.alt = 'Imagen'; img.className = 'message-image'; img.loading = 'lazy';
-    img.onload = () => img.classList.add('loaded');
-    img.addEventListener('click', () => openLightbox(imageSrc));
-    imgWrapper.appendChild(img);
-    bubble.appendChild(imgWrapper);
+  if (msg.imageBase64) {
+    var iw = document.createElement('div');
+    iw.className = 'message-image-wrapper';
+    if (msg.imageWidth && msg.imageHeight) iw.style.aspectRatio = msg.imageWidth + ' / ' + msg.imageHeight;
+    if (msg.imageBlur) { var bi = document.createElement('img'); bi.src = msg.imageBlur; bi.className = 'message-image-blur'; bi.loading = 'lazy'; iw.appendChild(bi); }
+    var im = document.createElement('img');
+    im.src = msg.imageBase64; im.alt = 'Imagen'; im.className = 'message-image'; im.loading = 'lazy';
+    im.onload = function() { this.classList.add('loaded'); };
+    im.addEventListener('click', function() { openLightbox(msg.imageBase64); });
+    iw.appendChild(im);
+    if (msg.texto) { var c = document.createElement('span'); c.className = 'msg-caption'; c.textContent = msg.texto; iw.appendChild(c); }
+    bubble.appendChild(iw);
     bubble.classList.add('has-image');
+  } else if (msg.audioBase64) {
+    var aw = document.createElement('div');
+    aw.className = 'msg-audio';
+    var au = document.createElement('audio');
+    au.src = msg.audioBase64; au.controls = true; au.preload = 'metadata';
+    aw.appendChild(au);
+    var wf = document.createElement('div');
+    wf.className = 'audio-waveform';
+    for (var i = 0; i < 30; i++) { var b = document.createElement('span'); b.className = 'waveform-bar'; b.style.height = (8 + Math.random() * 24) + 'px'; wf.appendChild(b); }
+    aw.appendChild(wf);
+    bubble.appendChild(aw);
   }
-
-  // Audio
-  if (audioBase64) {
-    const audioWrapper = document.createElement('div');
-    audioWrapper.className = 'message-audio';
-    const audio = document.createElement('audio');
-    audio.src = audioBase64;
-    audio.controls = true;
-    audio.preload = 'metadata';
-    audioWrapper.appendChild(audio);
-    bubble.appendChild(audioWrapper);
+  if (msg.texto && !msg.imageBase64) {
+    var te = document.createElement('span');
+    te.className = 'msg-text'; te.textContent = msg.texto;
+    bubble.appendChild(te);
   }
-
-  // Texto
-  if (texto) {
-    const textEl = document.createElement('span');
-    textEl.className = 'message-text';
-    textEl.textContent = texto;
-    bubble.appendChild(textEl);
-  }
-
-  // Meta (time + edited + status)
-  const metaWrapper = document.createElement('span');
-  metaWrapper.className = 'message-meta';
-  const timeSpan = document.createElement('span');
-  timeSpan.textContent = formatTime(msg.localTimestamp || msg.timestamp);
-  metaWrapper.appendChild(timeSpan);
-  if (editedAt) {
-    const editedBadge = document.createElement('span');
-    editedBadge.className = 'edited-badge';
-    editedBadge.textContent = ' editado';
-    metaWrapper.appendChild(editedBadge);
-  }
-  // Checkmarks de estado (solo para mensajes propios)
+  var meta = document.createElement('span');
+  meta.className = 'message-meta';
+  var ts = document.createElement('span');
+  ts.className = 'msg-time'; ts.textContent = formatTime(msg.timestamp);
+  meta.appendChild(ts);
+  if (msg.editedAt) { var eb = document.createElement('span'); eb.className = 'edited-badge'; eb.textContent = ' editado'; meta.appendChild(eb); }
   if (isSelf) {
-    const statusEl = document.createElement('span');
-    statusEl.className = `msg-status-icon ${msg.status || 'sent'}`;
-    const msgStatus = msg.status || 'sent';
-    if (msgStatus === 'sending') {
-      statusEl.innerHTML = `<svg class="status-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-    } else if (msgStatus === 'sent') {
-      statusEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>`;
-    } else if (msgStatus === 'delivered') {
-      statusEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="18 6 9 17 4 12"/><polyline points="23 6 12 17"/></svg>`;
-    } else if (msgStatus === 'read') {
-      statusEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="#53bdeb" stroke-width="2.5" width="14" height="14"><polyline points="18 6 9 17 4 12"/><polyline points="23 6 12 17"/></svg>`;
-    }
-    metaWrapper.appendChild(statusEl);
+    var se = document.createElement('span');
+    var s = msg.status || 'sent';
+    se.className = 'msg-status-icon ' + s;
+    if (s === 'sending') se.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+    else if (s === 'sent') se.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>';
+    else if (s === 'delivered') se.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="18 6 9 17 4 12"/><polyline points="23 6 12 17"/></svg>';
+    else if (s === 'read') se.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#53bdeb" stroke-width="2.5" width="14" height="14"><polyline points="18 6 9 17 4 12"/><polyline points="23 6 12 17"/></svg>';
+    meta.appendChild(se);
   }
-  bubble.appendChild(metaWrapper);
-
-  // Reacciones existentes
-  if (reactions && Object.keys(reactions).length > 0) {
-    const rc = document.createElement('div');
-    rc.className = 'message-reactions';
-    Object.entries(reactions).forEach(([emoji, uids]) => {
-      if (!uids?.length) return;
-      const btn = document.createElement('button');
-      btn.type = 'button'; btn.className = 'reaction-bubble';
-      if (uids.includes(currentUser?.uid)) btn.classList.add('user-reacted');
-      btn.textContent = `${emoji} ${uids.length}`;
-      btn.addEventListener('click', (e) => { e.stopPropagation(); toggleReaction(id, emoji); });
+  bubble.appendChild(meta);
+  if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+    var rc = document.createElement('div'); rc.className = 'message-reactions';
+    Object.keys(msg.reactions).forEach(function(emoji) {
+      var uids = msg.reactions[emoji]; if (!uids || !uids.length) return;
+      var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'reaction-bubble';
+      if (currentUser && uids.indexOf(currentUser.uid) >= 0) btn.classList.add('user-reacted');
+      btn.textContent = emoji + ' ' + uids.length;
+      btn.addEventListener('click', function(e) { e.stopPropagation(); toggleReaction(msg.id, emoji); });
       rc.appendChild(btn);
     });
     bubble.appendChild(rc);
   }
 }
-
-let lastRenderedMsg = null;
-
-// ============================================
-// RENDER LISTA COMPLETA DE MENSAJES (CON PAGINACIÓN Y DATE SEPARATORS)
-// ============================================
-function renderMessagesList() {
-  if (!elements.messagesContainer) return;
-
-  const wasAtBottom = isUserAtBottom();
-  const prevScrollHeight = elements.messagesContainer.scrollHeight;
-
-  // Limpiar mensajes renderizados (no DOM estático como el welcome message)
-  const existing = elements.messagesContainer.querySelectorAll('.message-wrapper, .date-separator');
-  existing.forEach(el => el.remove());
-
-  // Ocultar/mostrar welcome message
-  const welcomeEl = document.getElementById('welcome-message');
-  if (welcomeEl) {
-    if (allMessages.length > 0) {
-      welcomeEl.remove();
-      isFirstMessage = false;
-    }
-  }
-
-  const msgsToRender = allMessages.slice(-visibleCount);
-  let lastDateStr = null;
-  let lastUid = null;
-  let lastTs = 0;
-
-  msgsToRender.forEach((msg) => {
-    const isSelf = msg.uid === currentUser?.uid;
-    const ts = msg.localTimestamp || msg.timestamp || 0;
-    const msgDate = new Date(typeof ts === 'number' ? ts : new Date(ts).getTime());
-    const dateStr = msgDate.toDateString();
-
-    // Insertar separador de fecha si cambia el día
-    if (dateStr !== lastDateStr) {
-      elements.messagesContainer.appendChild(createDateSeparator(msgDate));
-      lastDateStr = dateStr;
-      lastUid = null;
-      lastTs = 0;
-    }
-
-    const isGrouped = lastUid === msg.uid && ts - lastTs < 120000;
-    lastUid = msg.uid;
-    lastTs = ts;
-
-    const wrapper = createMessageElement(msg, isSelf, isGrouped);
-    elements.messagesContainer.appendChild(wrapper);
-    if (msg.id) attachReactionListener(msg.id, wrapper, msg.reactions);
-  });
-
-  // Restaurar posición de scroll o hacer scroll al final
-  if (wasAtBottom) {
-    elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
-    unreadCount = 0;
-    updateScrollButton();
-  } else if (msgsToRender.length < allMessages.length) {
-    // Si cargamos mensajes anteriores, mantener la posición relativa
-    const newScrollHeight = elements.messagesContainer.scrollHeight;
-    elements.messagesContainer.scrollTop += (newScrollHeight - prevScrollHeight);
-  } else {
-    // Nuevos mensajes llegaron pero usuario está arriba
-    const newMsgCount = allMessages.length - msgsToRender.length;
-    if (newMsgCount > 0) {
-      unreadCount++;
-      updateScrollButton();
-    }
-  }
-}
-
-function createMessageElement(msg, isSelf, isGrouped) {
-  const { id, uid } = msg;
-  const ts = msg.localTimestamp || msg.timestamp || 0;
-
-  const wrapper = document.createElement('div');
-  wrapper.className = `message-wrapper ${isSelf ? 'self' : 'other'}${isGrouped ? ' grouped' : ''}`;
-  wrapper.dataset.messageId = id;
-  wrapper.dataset.messageUid = uid;
-  wrapper.dataset.messageTime = String(ts);
-
-  if (!isSelf && !isGrouped) {
-    const authorEl = document.createElement('span');
-    authorEl.className = 'message-meta-author';
-    authorEl.innerHTML = `${getIcon('user')} ${escapeHtml(msg.autor)}`;
-    wrapper.appendChild(authorEl);
-  }
-
-  const bubble = document.createElement('div');
-  bubble.className = 'message-bubble';
-
-  buildBubbleContent(msg, bubble, isSelf);
-  attachMessageActions(wrapper, bubble, msg, isSelf);
-
-  wrapper.appendChild(bubble);
-  return wrapper;
-}
-
-function renderMessage(msg, isSelf = false) {
-  // Compatibilidad: delegar a mergeIncomingMessages
-  mergeIncomingMessages([msg]);
-}
-
 function updateRenderedMessage(msg) {
-  const wrapper = elements.messagesContainer.querySelector(`[data-message-id="${msg.id}"]`);
+  var wrapper = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msg.id + '"]') : null;
   if (!wrapper) return;
-  const isSelf = msg.uid === currentUser?.uid;
-  const bubble = wrapper.querySelector('.message-bubble');
+  var bubble = wrapper.querySelector('.message-bubble');
   if (!bubble) return;
   bubble.innerHTML = '';
-  bubble.className = 'message-bubble';
-  buildBubbleContent(msg, bubble, isSelf);
-  if (msg.id) {
-    if (state.reactionUnsubscribes.has(msg.id)) {
-      state.reactionUnsubscribes.get(msg.id)();
-      state.reactionUnsubscribes.delete(msg.id);
-    }
-    attachReactionListener(msg.id, wrapper, msg.reactions);
+  buildBubbleContent(msg, bubble, msg.uid === (currentUser && currentUser.uid));
+}
+
+
+/* SENDING + SCROLL */
+function sendMessage(text, imageData, audioData) {
+  if (!currentUser || !username) return;
+  var currentReply = replyToMessage;
+  clearReplyPreview();
+  var msgId = generateClientId();
+  var data = { id: msgId, autor: username, uid: currentUser.uid, timestamp: firebase.firestore.FieldValue.serverTimestamp(), localTimestamp: Date.now(), reactions: {}, texto: '' };
+  if (text && text.trim()) data.texto = text.trim();
+  if (imageData) { data.imageBase64 = imageData.base64; data.imageBlur = imageData.blurPlaceholder; data.imageWidth = imageData.width; data.imageHeight = imageData.height; }
+  if (audioData) { data.audioBase64 = audioData.base64; data.audioMimeType = audioData.mimeType || 'audio/webm'; }
+  if (currentReply) { data.replyTo = { id: currentReply.id, autor: currentReply.autor, texto: currentReply.texto || '', imageSrc: currentReply.imageBase64 || null }; }
+  mergeIncomingMessages([Object.assign({}, data, { status: 'sending', timestamp: Date.now() })]);
+  sendToFirestoreOrQueue(data, msgId);
+}
+function sendToFirestoreOrQueue(data, msgId) {
+  if (isOnline) {
+    db.collection(MESSAGES_COLLECTION).doc(msgId).set(data).catch(function(e) { console.error('Send error:', e); addToOfflineQueue(data); });
+  } else { addToOfflineQueue(data); }
+}
+function sendImageMessage(base64, blur, w, h, caption) {
+  sendMessage(caption || '', { base64: base64, blurPlaceholder: blur, width: w, height: h }, null);
+}
+function sendAudioMessage(chunks, mimeType) {
+  if (!currentUser) return;
+  var blob = new Blob(chunks, { type: mimeType });
+  var reader = new FileReader();
+  reader.onload = function() { sendMessage('', null, { base64: reader.result, mimeType: mimeType }); };
+  reader.readAsDataURL(blob);
+}
+function isUserAtBottom() {
+  if (!el.messagesContainer) return true;
+  var c = el.messagesContainer;
+  return c.scrollHeight - c.scrollTop - c.clientHeight < 100;
+}
+function scrollToBottom() { if (el.messagesContainer) el.messagesContainer.scrollTop = el.messagesContainer.scrollHeight; }
+function updateScrollButton() {
+  if (!el.scrollToBottomBtn) return;
+  if (unreadCount > 0 && !isUserAtBottom()) {
+    el.scrollToBottomBtn.classList.remove('hidden');
+    el.scrollToBottomBtn.style.display = 'flex';
+    var cnt = el.scrollToBottomBtn.querySelector('.scroll-count');
+    if (cnt) cnt.textContent = unreadCount === 1 ? '1 mensaje nuevo' : unreadCount + ' mensajes nuevos';
+  } else {
+    el.scrollToBottomBtn.classList.add('hidden');
+    el.scrollToBottomBtn.style.display = 'none';
+    unreadCount = 0;
   }
 }
-
-// ============================================
-// ACCIONES DE MENSAJES (menú contextual)
-// ============================================
-function attachMessageActions(wrapper, bubble, msg, isSelf) {
-  // Reply button (desktop hover)
-  const replyBtn = document.createElement('button');
-  replyBtn.className = 'swipe-reply-btn';
-  replyBtn.innerHTML = getIcon('reply');
-  replyBtn.setAttribute('aria-label', 'Responder');
-  replyBtn.addEventListener('click', (e) => { e.stopPropagation(); setReplyPreview(msg); });
-  wrapper.appendChild(replyBtn);
-
-  const showMenu = (e, isTouch = false) => {
-    if (!isTouch) e.preventDefault();
-    closeAllMenus();
-
-    const menu = document.createElement('div');
-    menu.className = 'custom-context-menu';
-    menu.id = 'active-context-menu';
-
-    const items = [
-      { icon: 'reply', label: 'Responder', action: () => setReplyPreview(msg) },
-      { icon: 'react', label: 'Reaccionar', action: () => openReactionPicker(bubble, msg) },
-    ];
-    if (isSelf && msg.texto && !msg.audioBase64) {
-      items.push({ icon: 'edit', label: 'Editar', action: () => openEditModal(msg.id, msg.texto) });
-    }
-    if (isSelf) {
-      items.push({ icon: 'delete', label: 'Eliminar', action: () => deleteMessage(msg.id), danger: true });
-    }
-    items.push({ icon: 'pin', label: 'Fijar mensaje', action: () => pinMessage(msg.id, msg.texto || '[Imagen/Audio]') });
-
-    items.forEach(item => {
-      const btn = document.createElement('button');
-      btn.className = 'context-menu-item' + (item.danger ? ' danger' : '');
-      btn.innerHTML = `<span class="context-menu-icon">${getIcon(item.icon)}</span><span>${item.label}</span>`;
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        item.action();
-        menu.remove();
-      });
-      menu.appendChild(btn);
-    });
-
-    let x = isTouch ? window.innerWidth / 2 - 90 : e.clientX;
-    let y = isTouch ? (e.clientY || wrapper.getBoundingClientRect().bottom) : e.clientY;
-    menu.style.left = `${Math.min(x, window.innerWidth - 190)}px`;
-    menu.style.top = `${Math.min(y, window.innerHeight - items.length * 52 - 20)}px`;
-    document.body.appendChild(menu);
-
-    setTimeout(() => {
-      document.addEventListener('click', function closeMenu(ev) {
-        if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', closeMenu); }
-      });
-    }, 0);
-  };
-
-  wrapper.addEventListener('contextmenu', (e) => showMenu(e));
-
-  let pressTimer = null;
-  bubble.addEventListener('touchstart', (e) => {
-    pressTimer = setTimeout(() => {
-      const touch = e.changedTouches[0];
-      showMenu({ clientX: touch.clientX, clientY: touch.clientY, preventDefault: () => {} }, true);
-    }, 500);
-  }, { passive: true });
-  bubble.addEventListener('touchend', () => clearTimeout(pressTimer), { passive: true });
-  bubble.addEventListener('touchmove', () => clearTimeout(pressTimer), { passive: true });
-}
-
-function closeAllMenus() {
-  document.getElementById('active-context-menu')?.remove();
-}
-
-// ============================================
-// EMOJI PICKER
-// ============================================
-const EMOJIS = [
-  '😀','😃','😄','😁','😆','😅','😂','🤣',
-  '😊','😇','🙂','🙃','😉','😌','😍','🥰',
-  '😘','😗','😙','😚','😋','😛','😝','😜',
-  '🤪','🤨','🧐','🤓','😎','🤩','🥳','😏',
-  '😒','😞','😔','😟','😕','🙁','☹️','😣',
-  '😫','😩','🥺','😢','😭','😤','😠','😡',
-  '🤬','🤯','😳','🥵','🥶','😱','😨','😰',
-  '😥','😓','🤗','🤔','🤭','🤫','🤥','😶',
-  '👍','👎','👌','✌️','🤞','🤟','🤘','🤙',
-  '👏','🙌','🤝','🙏','❤️','🧡','💛','💚',
-  '💙','💜','🖤','🤍','🤎','💔','💕','💞',
-  '💓','💗','💖','💘','💝','🔥','💯','🎉',
-  '✨','🎊','🥂','🍾','🎁','🎂','🌹','💐',
-  '🌈','⭐','🌟','💫','🌙','☀️','🌊','🦋',
-  '🐶','🐱','🐰','🐻','🦊','🐷','🐸','🐧',
-  '👻','💩','🤡','👽','🤖','🎃','😺','😹'
-];
-
-const EMOJI_CATEGORIES = {
-  '😀': '😊',
-  '👍': '👍',
-  '❤️': '❤️',
-  '🎉': '🎉',
-  '🔥': '🔥'
-};
-
-function initEmojiPicker() {
-  // Add category header (recent or just first)
-  const categoryLabel = document.createElement('div');
-  categoryLabel.className = 'emoji-category-label';
-  categoryLabel.textContent = 'Emoji';
-  elements.emojiPickerInner.appendChild(categoryLabel);
-
-  EMOJIS.forEach(emoji => {
-    const btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'emoji-item'; btn.textContent = emoji;
-    btn.addEventListener('click', () => {
-      elements.messageInput.value += emoji;
-      elements.messageInput.focus();
-      elements.emojiPicker.classList.add('hidden');
-    });
-    elements.emojiPickerInner.appendChild(btn);
+function refreshDateSeparators() {
+  if (!el.messagesContainer) return;
+  el.messagesContainer.querySelectorAll('.date-separator').forEach(function(e){ e.remove(); });
+  var wrappers = el.messagesContainer.querySelectorAll('.message-wrapper');
+  var lastDateStr = null;
+  wrappers.forEach(function(w) {
+    var ts = parseInt(w.dataset.messageTime, 10);
+    var d = new Date(ts); var ds = d.toDateString();
+    if (ds !== lastDateStr) { w.parentNode.insertBefore(createDateSeparator(d), w); lastDateStr = ds; }
   });
+}
 
-  elements.emojiBtn.addEventListener('click', (e) => {
+
+/* REACTIONS */
+function toggleReaction(msgId, emoji) {
+  if (!currentUser || !msgId) return;
+  var msg = allMessages.find(function(m){ return m.id === msgId; });
+  if (!msg) return;
+  
+  var reactions = JSON.parse(JSON.stringify(msg.reactions || {}));
+  var uids = reactions[emoji] ? reactions[emoji].slice() : [];
+  var idx = uids.indexOf(currentUser.uid);
+  
+  if (idx >= 0) {
+    uids.splice(idx, 1);
+    if (uids.length === 0) { delete reactions[emoji]; }
+    else { reactions[emoji] = uids; }
+  } else {
+    Object.keys(reactions).forEach(function(e) {
+      var arr = reactions[e] ? reactions[e].slice() : [];
+      var i = arr.indexOf(currentUser.uid);
+      if (i >= 0) { arr.splice(i, 1); }
+      if (arr.length === 0) { delete reactions[e]; }
+      else { reactions[e] = arr; }
+    });
+    uids = [currentUser.uid];
+    reactions[emoji] = uids;
+  }
+  
+  var msgIndex = allMessages.findIndex(function(m){ return m.id === msgId; });
+  if (msgIndex >= 0) { allMessages[msgIndex].reactions = reactions; }
+  
+  var wrapper = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
+  if (wrapper) { updateRenderedMessage(allMessages[msgIndex] || msg); }
+  
+  db.collection(MESSAGES_COLLECTION).doc(msgId).update({ reactions: reactions }).then(function() {
+  }).catch(function(err) {
+    console.error('Reaction error:', err);
+    if (msgIndex >= 0) { allMessages[msgIndex].reactions = msg.reactions || {}; }
+    if (wrapper) { updateRenderedMessage(allMessages[msgIndex] || msg); }
+  });
+}
+function setReplyPreview(msg) {
+  replyToMessage = msg;
+  if (!el.replyPreview) return;
+  var content = el.replyPreview.querySelector('.reply-preview-content');
+  if (content) {
+    var txt = msg.texto ? msg.texto.substring(0, 60) : (msg.imageBase64 ? 'Imagen' : msg.audioBase64 ? 'Audio' : '');
+    content.innerHTML = '<strong>' + escapeHtml(msg.autor || '') + '</strong>: ' + escapeHtml(txt);
+  }
+  el.replyPreview.style.display = 'flex';
+}
+function openReactionPicker(msg) {
+  if (!el.reactionPicker || !el.reactionPickerContent) return;
+  el.reactionPickerContent.innerHTML = '';
+  
+  var quickReactions = ['👍','❤️','😂','😮','😢','🙏','🔥'];
+  quickReactions.forEach(function(emoji) {
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'reaction-item';
+    btn.textContent = emoji;
+    btn.setAttribute('aria-label', 'Reaccionar con ' + emoji);
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleReaction(msg.id, emoji);
+      closeReactionPicker();
+    });
+    el.reactionPickerContent.appendChild(btn);
+  });
+  
+  var moreBtn = document.createElement('button');
+  moreBtn.type = 'button'; moreBtn.className = 'reaction-item reaction-item-add';
+  moreBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  moreBtn.setAttribute('aria-label', 'Más reacciones');
+  moreBtn.addEventListener('click', function(e) {
     e.stopPropagation();
-    elements.emojiPicker.classList.toggle('hidden');
+    showFullEmojiPicker(msg.id);
   });
-
-  document.addEventListener('click', (e) => {
-    if (!elements.emojiPicker.contains(e.target) && e.target !== elements.emojiBtn) {
-      elements.emojiPicker.classList.add('hidden');
-    }
-  });
-}
-
-elements.messageInput.addEventListener('input', handleTypingInput);
-initEmojiPicker();
-
-// ============================================
-// REACCIONES
-// ============================================
-const REACTION_EMOJIS = [
-  { emoji: '👍', icon: 'thumbsUp', label: 'Me gusta' },
-  { emoji: '❤️', icon: 'heart', label: 'Amor' },
-  { emoji: '😂', icon: 'laugh', label: 'Gracioso' },
-  { emoji: '😮', icon: 'wow', label: 'Sorpresa' },
-  { emoji: '😢', icon: 'sad', label: 'Triste' },
-  { emoji: '🔥', icon: 'fire', label: 'Fuego' },
-  { emoji: '👏', icon: 'clap', label: 'Aplausos' },
-  { emoji: '🎉', icon: 'party', label: 'Fiesta' },
-  { emoji: '💯', icon: 'hundred', label: '100' },
-  { emoji: '🙏', icon: 'pray', label: 'Gracias' }
-];
-
-let currentMessageForReaction = null;
-
-function initReactionPicker() {
-  if (!elements.reactionPickerContent) return;
-  REACTION_EMOJIS.forEach(({ emoji, icon, label }) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'reaction-item';
-    btn.setAttribute('aria-label', label);
-    btn.innerHTML = `<span class="reaction-item-svg">${getIcon(icon)}</span><span class="reaction-item-text">${emoji}</span>`;
-    btn.addEventListener('click', () => {
-      if (currentMessageForReaction) toggleReaction(currentMessageForReaction.id, emoji);
-      closeReactionPicker();
-    });
-    elements.reactionPickerContent.appendChild(btn);
-  });
-
-  document.addEventListener('click', (e) => {
-    if (elements.reactionPicker && !elements.reactionPicker.contains(e.target) && !e.target.closest('.message-bubble')) {
-      closeReactionPicker();
-    }
-  });
-}
-
-function openReactionPicker(messageEl, msgData) {
-  if (!elements.reactionPicker) return;
-  currentMessageForReaction = { id: msgData.id, element: messageEl };
-  const rect = messageEl.getBoundingClientRect();
-  let left = rect.left + rect.width / 2 - 150;
-  let top = rect.top - 75;
-  if (left < 8) left = 8;
-  if (left + 300 > window.innerWidth) left = window.innerWidth - 308;
-  if (top < 8) top = rect.bottom + 8;
-  elements.reactionPickerContent.style.left = `${left}px`;
-  elements.reactionPickerContent.style.top = `${top}px`;
-  elements.reactionPicker.classList.remove('hidden');
-  elements.reactionPicker.style.display = 'flex';
-}
-
-function closeReactionPicker() {
-  elements.reactionPicker?.classList.add('hidden');
-  elements.reactionPicker.style.display = 'none';
-  currentMessageForReaction = null;
-}
-
-async function toggleReaction(messageId, emoji) {
-  if (!currentUser || !messageId) return;
-  const msgRef = db.collection(MESSAGES_COLLECTION).doc(messageId);
-  try {
-    await db.runTransaction(async (t) => {
-      const doc = await t.get(msgRef);
-      if (!doc.exists) return;
-      const reactions = doc.data().reactions || {};
-      const uids = reactions[emoji] || [];
-      const idx = uids.indexOf(currentUser.uid);
-      if (idx >= 0) uids.splice(idx, 1); else uids.push(currentUser.uid);
-      if (uids.length === 0) delete reactions[emoji]; else reactions[emoji] = uids;
-      t.update(msgRef, { reactions });
-    });
+  el.reactionPickerContent.appendChild(moreBtn);
+  
+  var wrapper = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msg.id + '"]') : null;
+  if (wrapper) {
+    var rect = wrapper.getBoundingClientRect();
+    var pickerWidth = Math.min(360, window.innerWidth - 32);
+    var top, left;
     
-    const msg = allMessages.find(m => m.id === messageId);
-    if (msg) {
-      msg.reactions = msg.reactions || {};
-      const uids = msg.reactions[emoji] || [];
-      const idx = uids.indexOf(currentUser.uid);
-      if (idx >= 0) uids.splice(idx, 1); else uids.push(currentUser.uid);
-      if (uids.length === 0) delete msg.reactions[emoji];
-      else msg.reactions[emoji] = uids;
-      const currentWrapper = reactionWrappers.get(messageId);
-      updateReactionsOnWrapper(messageId, currentWrapper, msg.reactions);
+    if (rect.top > 70) {
+      top = rect.top - 56;
+    } else {
+      top = rect.bottom + 8;
     }
-  } catch(e) {
-    console.error('Error reaction:', e);
-    if (e.message && (e.message.includes('429') || e.message.includes('RESOURCE_EXHAUSTED') || e.message.includes('Quota exceeded'))) {
-      activateSocketIOFallback();
+    top = Math.max(8, Math.min(top, window.innerHeight - 60));
+    
+    if (rect.left + rect.width / 2 > window.innerWidth / 2) {
+      left = Math.max(8, rect.right - pickerWidth);
+    } else {
+      left = Math.max(8, Math.min(rect.left, window.innerWidth - pickerWidth - 8));
     }
+    
+    el.reactionPickerContent.style.top = top + 'px';
+    el.reactionPickerContent.style.left = left + 'px';
+    el.reactionPickerContent.style.maxWidth = pickerWidth + 'px';
   }
-}
-
-function updateReactionsOnWrapper(messageId, wrapperEl, reactions) {
-  if (!wrapperEl) return;
-  const bubble = wrapperEl.querySelector('.message-bubble');
-  if (!bubble) return;
-  let rc = bubble.querySelector('.message-reactions');
-  const hasReactions = reactions && typeof reactions === 'object' && Object.values(reactions).some(u => u?.length > 0);
-  if (!hasReactions) { rc?.remove(); return; }
-  if (!rc) { rc = document.createElement('div'); rc.className = 'message-reactions'; bubble.appendChild(rc); }
-  rc.innerHTML = '';
-  Object.entries(reactions).forEach(([emoji, uids]) => {
-    if (!uids?.length) return;
-    const btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'reaction-bubble';
-    if (uids.includes(currentUser?.uid)) btn.classList.add('user-reacted');
-    btn.textContent = `${emoji} ${uids.length}`;
-    btn.addEventListener('click', (e) => { e.stopPropagation(); toggleReaction(messageId, emoji); });
-    rc.appendChild(btn);
+  
+  el.reactionPicker.classList.remove('hidden');
+  
+  requestAnimationFrame(function() {
+    document.addEventListener('click', closeReactionPicker, { once: true });
+    document.addEventListener('contextmenu', closeReactionPicker, { once: true });
   });
 }
 
-function attachReactionListener(messageId, wrapperEl, initialReactions) {
-  reactionWrappers.set(messageId, wrapperEl);
-  updateReactionsOnWrapper(messageId, wrapperEl, initialReactions);
-
-  if (!state.reactionUnsubscribes.has(messageId)) {
-    const unsub = db.collection(MESSAGES_COLLECTION).doc(messageId).onSnapshot((doc) => {
-      if (!doc.exists) return;
-      const data = doc.data();
-      const currentWrapper = reactionWrappers.get(messageId);
-      updateReactionsOnWrapper(messageId, currentWrapper, data.reactions || {});
+function showFullEmojiPicker(msgId) {
+  var overlay = document.createElement('div');
+  overlay.className = 'reaction-picker';
+  overlay.style.background = 'rgba(0,0,0,0.3)';
+  
+  var container = document.createElement('div');
+  container.className = 'reaction-picker-content';
+  container.style.cssText = 'position:fixed;bottom:16px;left:16px;right:16px;top:auto;max-width:none;width:auto;max-height:50vh;overflow-y:auto;display:grid;grid-template-columns:repeat(8,1fr);gap:4px;padding:12px;border-radius:16px;animation:reactionPopIn 0.2s ease;';
+  
+  var allEmojis = ['😀','😂','😍','🥰','😘','❤️','🔥','👍','👏','🎉','💕','😭','🥺','🤔','💪','✨','🙌','😢','😡','🥳','😎','🤗','🤫','😱','💋','😇','🤩','💀','🙏','✨','🤯','😴','🤮','🤡','👻','💀','👽','🤖','💩','😸','🐶','🐱','🦄','🌺','🌸','🍕','🍔','🎸','⚽','🎯','🏆','💎','🌈','☀️','🌙','⭐'];
+  
+  allEmojis.forEach(function(emoji) {
+    var btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'reaction-item';
+    btn.textContent = emoji;
+    btn.style.cssText = 'font-size:1.5rem;min-height:44px;min-width:44px;';
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleReaction(msgId, emoji);
+      overlay.remove();
     });
-    state.reactionUnsubscribes.set(messageId, unsub);
-  }
-}
-
-function renderInitialReactions(wrapperEl, reactions) {
-  if (!wrapperEl) return;
-  const bubble = wrapperEl.querySelector('.message-bubble');
-  if (!bubble) return;
-  const rc = bubble.querySelector('.message-reactions');
-  if (rc) rc.remove();
-  if (!reactions || typeof reactions !== 'object') return;
-  const hasReactions = Object.values(reactions).some(u => u?.length > 0);
-  if (!hasReactions) return;
-  const container = document.createElement('div');
-  container.className = 'message-reactions';
-  Object.entries(reactions).forEach(([emoji, uids]) => {
-    if (!uids?.length) return;
-    const btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'reaction-bubble';
-    if (uids.includes(currentUser?.uid)) btn.classList.add('user-reacted');
-    btn.textContent = `${emoji} ${uids.length}`;
-    btn.addEventListener('click', (e) => { e.stopPropagation(); toggleReaction(wrapperEl.dataset.messageId, emoji); });
     container.appendChild(btn);
   });
-  bubble.appendChild(container);
+  
+  overlay.appendChild(container);
+  document.body.appendChild(overlay);
+  
+  overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) overlay.remove();
+  });
+  
+  document.addEventListener('keydown', function handler(e) {
+    if (e.key === 'Escape') {
+      overlay.remove();
+      document.removeEventListener('keydown', handler);
+    }
+  });
 }
-initReactionPicker();
+function closeReactionPicker() {
+  if (el.reactionPicker) el.reactionPicker.classList.add('hidden');
+  if (el.reactionPickerContent) el.reactionPickerContent.innerHTML = '';
+}
+function clearReplyPreview() {
+  replyToMessage = null;
+  if (el.replyPreview) el.replyPreview.style.display = 'none';
+}
+function openEditModal(msgId, text) {
+  editingMessageId = msgId;
+  if (el.editModal) el.editModal.style.display = 'flex';
+  if (el.editInput) { el.editInput.value = text; el.editInput.focus(); }
+}
+function closeEditModal() {
+  editingMessageId = null;
+  if (el.editModal) el.editModal.style.display = 'none';
+}
+function saveEdit() {
+  if (!editingMessageId || !el.editInput) return;
+  var text = el.editInput.value.trim();
+  if (!text) return;
+  db.collection(MESSAGES_COLLECTION).doc(editingMessageId).update({ texto: text, editedAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(function(){ showError('Error al editar'); });
+  closeEditModal();
+}
+function deleteMessage(msgId) {
+  if (!confirm('Eliminar este mensaje?')) return;
+  db.collection(MESSAGES_COLLECTION).doc(msgId).delete().catch(function(){ showError('Error al eliminar'); });
+}
+function showContextMenu(e, msg, isSelf) {
+  closeAllMenus();
+  var menu = document.createElement('div');
+  menu.className = 'custom-context-menu';
+  menu.id = 'active-context-menu';
+  var items = [
+    { label: 'Responder', action: function(){ setReplyPreview(msg); } },
+    { label: 'Reaccionar', action: function(){ openReactionPicker(msg); } }
+  ];
+  if (isSelf && msg.texto && !msg.audioBase64) items.push({ label: 'Editar', action: function(){ openEditModal(msg.id, msg.texto); } });
+  if (isSelf) items.push({ label: 'Eliminar', action: function(){ deleteMessage(msg.id); }, danger: true });
+    items.push({ label: 'Fijar', action: function(){ pinMessage(msg.id, msg.texto || '[Mensaje]', msg.autor || ''); } });
+  if (!isSelf) items.push({ label: 'Destacar', action: function(){ toggleDestacado(msg.id); } });
+  items.forEach(function(item) {
+    var btn = document.createElement('button');
+    btn.className = 'context-menu-item' + (item.danger ? ' danger' : '');
+    btn.textContent = item.label;
+    btn.addEventListener('click', function(e){ e.stopPropagation(); closeAllMenus(); item.action(); });
+    menu.appendChild(btn);
+  });
+  document.body.appendChild(menu);
+  var rect = (e.target.closest('.message-wrapper') || e.target).getBoundingClientRect();
+  menu.style.top = Math.min(rect.top, window.innerHeight - 200) + 'px';
+  menu.style.left = Math.min(e.clientX || rect.left, window.innerWidth - 180) + 'px';
+}
+function closeAllMenus() {
+  document.querySelectorAll('.custom-context-menu').forEach(function(m){ m.remove(); });
+}
 
-// ============================================
-// GRABACIÓN DE AUDIO
-// ============================================
-async function startRecording() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+/* SEARCH + LIGHTBOX + VOICE */
+function toggleSearch() {
+  if (!el.searchBar) return;
+  var vis = el.searchBar.style.display === 'flex';
+  el.searchBar.style.display = vis ? 'none' : 'flex';
+  if (!vis && el.searchInput) el.searchInput.focus();
+  if (vis && el.searchInput) { el.searchInput.value = ''; filterMessages(''); }
+}
+function filterMessages(q) {
+  if (!el.messagesContainer) return;
+  el.messagesContainer.querySelectorAll('.message-wrapper').forEach(function(w) {
+    w.style.display = (!q || (w.textContent || '').toLowerCase().indexOf(q.toLowerCase()) >= 0) ? '' : 'none';
+  });
+}
+function openLightbox(src) {
+  var ov = document.createElement('div');
+  ov.className = 'lightbox-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:9999;display:flex;align-items:center;justify-content:center';
+  var img = document.createElement('img');
+  img.src = src; img.style.cssText = 'max-width:95%;max-height:95%;object-fit:contain;border-radius:4px';
+  ov.appendChild(img);
+  var cb = document.createElement('button');
+  cb.textContent = 'X'; cb.style.cssText = 'position:absolute;top:16px;right:16px;background:none;color:#fff;font-size:24px;border:none;cursor:pointer';
+  cb.addEventListener('click', function(e) { e.stopPropagation(); ov.remove(); });
+  ov.appendChild(cb);
+  ov.addEventListener('click', function() { ov.remove(); });
+  document.body.appendChild(ov);
+}
+var mediaStream = null;
+function startVoiceRecording() {
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+    mediaStream = stream;
+    var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    state.mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
     state.audioChunks = [];
-    state.voiceCancelled = false;
     state.recordingSeconds = 0;
-
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
-
-    state.mediaRecorder = new MediaRecorder(stream, { mimeType });
-    state.mediaRecorder.addEventListener('dataavailable', (e) => { if (e.data.size > 0) state.audioChunks.push(e.data); });
-    state.mediaRecorder.addEventListener('stop', async () => {
-      stream.getTracks().forEach(t => t.stop());
-      if (!state.voiceCancelled && state.audioChunks.length > 0) {
-        await sendAudioMessage(state.audioChunks, mimeType);
-      }
-      state.audioChunks = [];
-    });
-
-    state.mediaRecorder.start(100);
-    elements.voiceBtn.classList.add('recording');
-    elements.voiceBtn.setAttribute('aria-pressed', 'true');
-    elements.voiceIndicator.classList.remove('hidden');
-    elements.voiceIndicator.style.display = 'block';
-
-    // Haptic feedback
-    if (navigator.vibrate) navigator.vibrate(10);
-
-    state.recordingTimer = setInterval(() => {
+    state.voiceCancelled = false;
+    state.mediaRecorder.ondataavailable = function(e) { if (e.data.size > 0) state.audioChunks.push(e.data); };
+    state.mediaRecorder.onstop = function() {
+      if (!state.voiceCancelled && state.audioChunks.length > 0) sendAudioMessage(state.audioChunks, mime);
+      cleanupVoiceRecording();
+    };
+    state.mediaRecorder.start();
+    if (el.voiceIndicator) el.voiceIndicator.style.display = 'flex';
+    if (el.voiceBtn) el.voiceBtn.setAttribute('aria-pressed', 'true');
+    state.recordingTimer = setInterval(function() {
       state.recordingSeconds++;
-      const m = Math.floor(state.recordingSeconds / 60);
-      const s = state.recordingSeconds % 60;
-      elements.voiceRecTime.textContent = `${m}:${String(s).padStart(2,'0')}`;
-      if (state.recordingSeconds >= 120) stopRecording(false);
+      if (el.voiceRecTime) el.voiceRecTime.textContent = Math.floor(state.recordingSeconds / 60) + ':' + String(state.recordingSeconds % 60).padStart(2, '0');
+      if (state.recordingSeconds >= 60) stopVoiceRecording();
     }, 1000);
-  } catch(e) {
-    showError('No se pudo acceder al micrófono. Verifica los permisos.');
-    console.error('Mic error:', e);
-  }
+  }).catch(function(err) { console.error('Mic error:', err); showError('No se pudo acceder al microfono'); });
+}
+function stopVoiceRecording() {
+  if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') state.mediaRecorder.stop();
+}
+function cancelVoiceRecording() { state.voiceCancelled = true; stopVoiceRecording(); }
+function cleanupVoiceRecording() {
+  if (state.recordingTimer) { clearInterval(state.recordingTimer); state.recordingTimer = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(function(t){ t.stop(); }); mediaStream = null; }
+  state.mediaRecorder = null; state.audioChunks = []; state.recordingSeconds = 0;
+  if (el.voiceIndicator) el.voiceIndicator.style.display = 'none';
+  if (el.voiceBtn) el.voiceBtn.setAttribute('aria-pressed', 'false');
 }
 
-function stopRecording(cancel = false) {
-  if (!state.mediaRecorder || state.mediaRecorder.state === 'inactive') return;
-  state.voiceCancelled = cancel;
-  clearInterval(state.recordingTimer);
-  if (cancel) {
-    if (navigator.vibrate) navigator.vibrate([20, 30, 20]);
+
+/* IMAGE HANDLING */
+function showImageOptionsModal() { if (el.imageOptionsModal) el.imageOptionsModal.style.display = 'flex'; }
+function hideImageOptionsModal() { if (el.imageOptionsModal) el.imageOptionsModal.style.display = 'none'; }
+function showImagePreviewModal(files) {
+  pendingImageFiles = Array.from(files);
+  pendingImagePreviews = [];
+  if (!el.imagePreviewContainer || !el.imagePreviewModal) return;
+  el.imagePreviewContainer.innerHTML = '';
+  pendingImageFiles.forEach(function(file, i) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      pendingImagePreviews.push(e.target.result);
+      var thumb = document.createElement('div');
+      thumb.className = 'preview-thumb';
+      thumb.style.cssText = 'position:relative;display:inline-block;margin:4px';
+      var img = document.createElement('img');
+      img.src = e.target.result; img.style.cssText = 'max-width:150px;max-height:150px;border-radius:8px';
+      thumb.appendChild(img);
+      var rb = document.createElement('button');
+      rb.textContent = 'X'; rb.style.cssText = 'position:absolute;top:2px;right:2px;background:red;color:#fff;border:none;border-radius:50%;width:20px;height:20px;cursor:pointer;font-size:12px';
+      rb.addEventListener('click', function() { pendingImageFiles.splice(i, 1); thumb.remove(); });
+      thumb.appendChild(rb);
+      el.imagePreviewContainer.appendChild(thumb);
+    };
+    reader.readAsDataURL(file);
+  });
+  el.imagePreviewModal.style.display = 'flex';
+}
+function hideImagePreviewModal() {
+  pendingImageFiles = []; pendingImagePreviews = [];
+  if (el.imagePreviewModal) el.imagePreviewModal.style.display = 'none';
+  if (el.imagePreviewContainer) el.imagePreviewContainer.innerHTML = '';
+  if (el.imageCaptionInput) el.imageCaptionInput.value = '';
+}
+function sendPendingImages() {
+  if (pendingImageFiles.length === 0) return;
+  var caption = el.imageCaptionInput ? el.imageCaptionInput.value.trim() : '';
+  pendingImageFiles.forEach(function(file, i) {
+    compressImageToBase64(file).then(function(r) {
+      sendImageMessage(r.base64, r.blurPlaceholder, r.width, r.height, i === 0 ? caption : '');
+    }).catch(function() { showError('Error al enviar imagen'); });
+  });
+  hideImagePreviewModal();
+}
+
+/* EMOJI PICKER */
+function toggleEmojiPicker() {
+  if (!el.emojiPicker) return;
+  var vis = !el.emojiPicker.classList.contains('hidden');
+  if (vis) {
+    el.emojiPicker.classList.add('hidden');
   } else {
-    if (navigator.vibrate) navigator.vibrate(8);
+    el.emojiPicker.innerHTML = '';
+    ['😀','😂','😍','🥰','😘','❤️','🔥','👍','👏','🎉','💕','😭','🥺','🤔','💪','✨','🙌','😢','😡','🥳','😎','🤗','🤫','😱','💋','😇','🤩','💀','🙏','✨'].forEach(function(e) {
+      var btn = document.createElement('button');
+      btn.type = 'button'; btn.textContent = e; btn.className = 'emoji-item';
+      btn.addEventListener('click', function() {
+        if (el.messageInput) { el.messageInput.value += e; el.messageInput.focus(); }
+        el.emojiPicker.classList.add('hidden');
+      });
+      el.emojiPicker.appendChild(btn);
+    });
+    el.emojiPicker.classList.remove('hidden');
   }
-  state.recordingTimer = null;
-  state.recordingSeconds = 0;
-  elements.voiceRecTime.textContent = '0:00';
-  elements.voiceBtn.classList.remove('recording');
-  elements.voiceBtn.setAttribute('aria-pressed', 'false');
-  elements.voiceIndicator.classList.add('hidden');
-  elements.voiceIndicator.style.display = 'none';
-  state.mediaRecorder.stop();
 }
 
-async function sendAudioMessage(chunks, mimeType) {
+/* PROFILES */
+function loadMyProfile() {
   if (!currentUser) return;
-  const blob = new Blob(chunks, { type: mimeType });
-
-  const base64 = await new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.readAsDataURL(blob);
-  });
-
-  const msgId = generateClientId();
-  const data = {
-    id: msgId,
-    autor: username,
-    uid: currentUser.uid,
-    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-    localTimestamp: Date.now(),
-    audioBase64: base64,
-    audioMimeType: mimeType,
-    reactions: {},
-    texto: ''
-  };
-
-  const currentReply = replyToMessage;
-  if (currentReply) { data.replyTo = { id: currentReply.id, autor: currentReply.autor, texto: currentReply.texto }; }
-  clearReplyPreview();
-
-  const optimisticMsg = {
-    ...data,
-    id: msgId,
-    status: 'sending',
-    uid: currentUser.uid,
-    timestamp: Date.now(),
-    localTimestamp: data.localTimestamp
-  };
-  mergeIncomingMessages([optimisticMsg]);
-
-  try {
-    if (connectionMode === 'socketio' && state.socket) {
-      state.socket.emit('chatMessage', { roomId: ROOM_ID, ...data });
-    } else if (isOnline) {
-      await db.collection(MESSAGES_COLLECTION).doc(msgId).set(data);
-    } else {
-      addToOfflineQueue(data);
-    }
-  } catch(e) { addToOfflineQueue(data); }
+  db.collection(USERS_COLLECTION).doc(currentUser.uid).get().then(function(doc) {
+    if (doc.exists) { var d = doc.data(); myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' }; }
+  }).catch(function(){});
+}
+function loadPartnerProfile() {
+  var partner = getPartnerConfig();
+  if (!partner) return;
+  db.collection(USERS_COLLECTION).where('uid', '!=', currentUser.uid).limit(1).get().then(function(snap) {
+    if (!snap.empty) { var d = snap.docs[0].data(); partnerProfile = { username: d.username || partner.name, avatarBase64: d.avatarBase64 || '', bio: d.bio || '' }; }
+    else { partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; }
+    updateMyProfileUI(); updatePartnerProfileUI(); updateHeaderBadge(null);
+  }).catch(function(){ partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; updateMyProfileUI(); updatePartnerProfileUI(); });
+}
+function updateMyProfileUI() {
+  if (el.profileNameInput) el.profileNameInput.value = myProfile.username || '';
+  if (el.profileBioInput) el.profileBioInput.value = myProfile.bio || '';
+  if (el.profileAvatar) {
+    if (myProfile.avatarBase64) { el.profileAvatar.style.backgroundImage = 'url(' + myProfile.avatarBase64 + ')'; el.profileAvatar.classList.remove('placeholder'); }
+    else { el.profileAvatar.style.backgroundImage = ''; el.profileAvatar.classList.add('placeholder'); }
+  }
+}
+function updatePartnerProfileUI() {
+  if (el.partnerProfileName) el.partnerProfileName.textContent = partnerProfile.username || 'Mi Amor';
+  if (el.partnerProfileBio) el.partnerProfileBio.textContent = partnerProfile.bio || '';
+  if (el.partnerProfileAvatar && partnerProfile.avatarBase64) el.partnerProfileAvatar.style.backgroundImage = 'url(' + partnerProfile.avatarBase64 + ')';
+  updateHeaderPartnerAvatar();
+}
+function updateHeaderPartnerAvatar() {
+  var name = partnerProfile.username || getPartnerConfig().name || 'Mi Amor';
+  var avatar = partnerProfile.avatarBase64 || '';
+  var img = document.getElementById('header-partner-img');
+  var initial = document.getElementById('header-partner-initial');
+  var headerName = document.getElementById('header-partner-name');
+  if (headerName) headerName.textContent = name;
+  if (avatar && img) {
+    img.src = avatar;
+    img.style.display = 'block';
+    if (initial) initial.style.display = 'none';
+  } else if (initial) {
+    initial.textContent = name.charAt(0).toUpperCase();
+    initial.style.display = 'flex';
+    if (img) img.style.display = 'none';
+  }
+}
+function saveProfile() {
+  if (!currentUser) return;
+  var name = el.profileNameInput ? el.profileNameInput.value.trim() : '';
+  var bio = el.profileBioInput ? el.profileBioInput.value.trim() : '';
+  myProfile.username = name; myProfile.bio = bio;
+  db.collection(USERS_COLLECTION).doc(currentUser.uid).set({
+    username: name, bio: bio, avatarBase64: myProfile.avatarBase64,
+    uid: currentUser.uid, email: currentUser.email,
+    lastActive: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true }).then(function() {
+    if (name) username = name;
+    showError('Perfil guardado');
+  }).catch(function(){ showError('Error al guardar perfil'); });
 }
 
-// Eventos botón de voz
-elements.voiceBtn.addEventListener('mousedown', (e) => {
-  e.preventDefault();
-  isHolding = true;
-  touchStartX = e.clientX;
-  startRecording();
-});
 
-document.addEventListener('mouseup', (e) => {
-  if (!isHolding) return;
-  isHolding = false;
-  const dx = Math.abs(e.clientX - touchStartX);
-  stopRecording(dx > 60);
-});
-
-elements.voiceBtn.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  isHolding = true;
-  touchStartX = e.touches[0].clientX;
-  startRecording();
-}, { passive: false });
-
-document.addEventListener('touchend', (e) => {
-  if (!isHolding) return;
-  isHolding = false;
-  const endX = e.changedTouches[0]?.clientX || touchStartX;
-  const dx = touchStartX - endX;
-  stopRecording(dx > 60);
-}, { passive: true });
-
-document.addEventListener('touchmove', (e) => {
-  if (!isHolding) return;
-  const curX = e.touches[0].clientX;
-  const dx = touchStartX - curX;
-  const hint = elements.voiceIndicator.querySelector('.voice-rec-hint');
-  if (!hint) return;
-  if (dx > 80) {
-    hint.textContent = '¡Suelta para cancelar!';
-    hint.style.color = '#f87171';
-  } else {
-    hint.textContent = 'Suelta para enviar · Desliza para cancelar';
-    hint.style.color = '';
-  }
-}, { passive: true });
-
-// ============================================
-// IMÁGENES
-// ============================================
-elements.imageBtn.addEventListener('click', () => elements.imageInput.click());
-
-async function compressImageToBase64(file, maxWidth = 800, quality = 0.7) {
-  const blurPlaceholder = await new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 20; canvas.height = 20;
-        canvas.getContext('2d').drawImage(img, 0, 0, 20, 20);
-        resolve(canvas.toDataURL('image/jpeg', 0.1));
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let { width, height } = img;
-        if (width > maxWidth) { height = (height * maxWidth) / width; width = maxWidth; }
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        let base64 = canvas.toDataURL('image/webp', quality);
-        if (!base64.startsWith('data:image/webp')) base64 = canvas.toDataURL('image/jpeg', quality);
-        const sizeKB = Math.round((base64.length * 3) / 4 / 1024);
-        resolve({ base64, sizeKB, blurPlaceholder, width, height });
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+/* SETTINGS + DESTACADOS */
+function openSettingsModal() {
+  if (el.settingsModal) el.settingsModal.style.display = 'flex';
+  updateMyProfileUI(); updatePartnerProfileUI(); loadStats();
 }
-
-elements.imageInput.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file || !currentUser) return;
-  if (!file.type.startsWith('image/')) {
-    showError('Solo se permiten imágenes');
-    return;
-  }
-
-  elements.sendBtn.disabled = true;
-  const imageBtnEl = elements.imageBtn.closest('.btn-media');
-  if (imageBtnEl) {
-    imageBtnEl.disabled = true;
-    const inner = imageBtnEl.querySelector('.btn-media-inner');
-    if (inner) inner.innerHTML = '<span class="spinner"></span>';
-  }
-
-  try {
-    const { base64, sizeKB, blurPlaceholder, width, height } = await compressImageToBase64(file);
-    if (sizeKB > 950) throw new Error('Imagen demasiado grande');
-
-    const msgId = generateClientId();
-    const data = {
-      id: msgId,
-      texto: elements.messageInput.value.trim() || '',
-      autor: username,
-      uid: currentUser.uid,
-      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-      localTimestamp: Date.now(),
-      imageBase64: base64,
-      imageBlur: blurPlaceholder,
-      imageWidth: width, imageHeight: height,
-      imageName: file.name,
-      reactions: {}
-    };
-    const cr = replyToMessage;
-    if (cr) { data.replyTo = { id: cr.id, autor: cr.autor, texto: cr.texto, imageSrc: cr.imageSrc }; }
-    clearReplyPreview();
-
-    const optimisticMsg = {
-      ...data,
-      id: msgId,
-      status: 'sending',
-      uid: currentUser.uid,
-      timestamp: Date.now(),
-      localTimestamp: data.localTimestamp
-    };
-    mergeIncomingMessages([optimisticMsg]);
-
-    try {
-      if (connectionMode === 'socketio' && state.socket) {
-        state.socket.emit('chatMessage', { roomId: ROOM_ID, ...data });
-      } else if (isOnline) {
-        await db.collection(MESSAGES_COLLECTION).doc(msgId).set(data);
-      } else {
-        addToOfflineQueue(data);
-      }
-    } catch(err) {
-      addToOfflineQueue(data);
-    }
-
-    elements.messageInput.value = '';
-    elements.imageInput.value = '';
-  } catch(err) {
-    showError('Error al enviar imagen: ' + err.message);
-  } finally {
-    elements.sendBtn.disabled = false;
-    if (imageBtnEl) {
-      imageBtnEl.disabled = false;
-      const inner = imageBtnEl.querySelector('.btn-media-inner');
-      if (inner) inner.innerHTML = getIcon('image');
-    }
-    elements.messageInput.focus();
-  }
-});
-
-// ============================================
-// LIGHTBOX
-// ============================================
-const lightbox = document.createElement('div');
-lightbox.className = 'image-lightbox hidden';
-lightbox.innerHTML = `<button class="close-lightbox" aria-label="Cerrar"><span aria-hidden="true"></span></button><img src="" alt="Imagen ampliada" />`;
-document.body.appendChild(lightbox);
-const lightboxImg = lightbox.querySelector('img');
-const lightboxCloseIcon = lightbox.querySelector('.close-lightbox span');
-renderIcon(lightboxCloseIcon, 'close');
-
-lightbox.querySelector('.close-lightbox').addEventListener('click', () => { lightbox.classList.add('hidden'); lightboxImg.src = ''; });
-lightbox.addEventListener('click', (e) => { if (e.target === lightbox) { lightbox.classList.add('hidden'); lightboxImg.src = ''; } });
-
-// Swipe to close lightbox
-let lightboxStartX = 0;
-let lightboxStartY = 0;
-lightbox.addEventListener('touchstart', (e) => {
-  if (e.touches.length === 1) {
-    lightboxStartX = e.touches[0].clientX;
-    lightboxStartY = e.touches[0].clientY;
-  }
-}, { passive: true });
-
-// ============================================
-// BÚSQUEDA
-// ============================================
-elements.searchToggleBtn?.addEventListener('click', () => {
-  elements.searchBar.classList.toggle('hidden');
-  if (!elements.searchBar.classList.contains('hidden')) {
-    elements.searchBar.style.display = 'flex';
-    elements.searchInput.focus();
-  } else {
-    elements.searchBar.style.display = 'none';
-    elements.searchInput.value = '';
-    filterMessages('');
-  }
-});
-
-elements.searchCloseBtn?.addEventListener('click', () => {
-  elements.searchBar.classList.add('hidden');
-  elements.searchBar.style.display = 'none';
-  elements.searchInput.value = '';
-  filterMessages('');
-});
-
-elements.searchInput?.addEventListener('input', (e) => filterMessages(e.target.value.toLowerCase().trim()));
-
-function filterMessages(query) {
-  document.querySelectorAll('.message-wrapper').forEach(w => {
-    w.style.display = !query || w.textContent.toLowerCase().includes(query) ? '' : 'none';
-  });
+function closeSettingsModal() { if (el.settingsModal) el.settingsModal.style.display = 'none'; }
+function loadStats() {
+  if (!el.statTotal) return;
+  el.statTotal.textContent = allMessages.length;
+  var mine = allMessages.filter(function(m){ return m.uid === (currentUser && currentUser.uid); }).length;
+  if (el.statMine) el.statMine.textContent = mine;
+  if (el.statPartner) el.statPartner.textContent = allMessages.length - mine;
+  if (el.statImages) el.statImages.textContent = allMessages.filter(function(m){ return m.imageBase64; }).length;
+  if (el.statAudios) el.statAudios.textContent = allMessages.filter(function(m){ return m.audioBase64; }).length;
 }
-
-// ============================================
-// DRAG & DROP
-// ============================================
-const chatContainer = document.getElementById('chat-container');
-const dragDropOverlay = document.getElementById('drag-drop-overlay');
-
-if (chatContainer && dragDropOverlay) {
-  ['dragenter', 'dragover'].forEach(ev => {
-    chatContainer.addEventListener(ev, (e) => {
-      e.preventDefault();
-      dragDropOverlay.classList.remove('hidden');
-      dragDropOverlay.style.display = 'flex';
+function startDestacadosListeners() {
+  if (!currentUser) return;
+  var mySlot = getAssignedUser();
+  if (!mySlot) return;
+  db.collection(DESTACADOS_COLLECTION).doc(mySlot).collection('items').onSnapshot(function(snap) {
+    myDestacados = []; myDestacadoIds = new Set();
+    snap.forEach(function(doc) { var d = Object.assign({}, doc.data(), { id: doc.id }); myDestacados.push(d); myDestacadoIds.add(doc.id); });
+    if (el.destacadosCount) el.destacadosCount.textContent = myDestacados.length > 0 ? myDestacados.length : '';
+  }, function(){});
+}
+function startPartnerShareSettingListener() {
+  var partner = getPartnerConfig();
+  if (!partner) return;
+  db.collection(SETTINGS_COLLECTION).doc(partner.key).onSnapshot(function(doc) {
+    if (doc.exists) {
+      partnerShares = doc.data().shareDestacados === true;
+      if (el.partnerDestacadosStatus) el.partnerDestacadosStatus.textContent = partnerShares ? 'Disponible' : 'No compartido';
+    }
+  }, function(){});
+}
+function toggleDestacado(msgId) {
+  if (!currentUser || !msgId) return;
+  var mySlot = getAssignedUser();
+  if (!mySlot) return;
+  var ref = db.collection(DESTACADOS_COLLECTION).doc(mySlot).collection('items').doc(msgId);
+  if (myDestacadoIds.has(msgId)) { ref.delete().catch(function(){}); }
+  else {
+    var msg = allMessages.find(function(m){ return m.id === msgId; });
+    if (msg) ref.set({ texto: msg.texto || '', imageBase64: msg.imageBase64 || null, autor: msg.autor || '', timestamp: msg.timestamp || Date.now(), createdAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(function(){});
+  }
+}
+function toggleShareDestacados() {
+  var mySlot = getAssignedUser();
+  if (!mySlot || !el.shareDestacadosToggle) return;
+  myShareDestacados = el.shareDestacadosToggle.checked;
+  db.collection(SETTINGS_COLLECTION).doc(mySlot).set({ shareDestacados: myShareDestacados }, { merge: true }).catch(function(){});
+}
+function showDestacadosModal(type) {
+  if (!el.destacadosModal || !el.destacadosList) return;
+  el.destacadosList.innerHTML = '';
+  var title = el.destacadosModal.querySelector('.destacados-title');
+  var items = type === 'my' ? myDestacados : [];
+  if (title) title.textContent = type === 'my' ? 'Mis destacados' : 'Destacados de mi pareja';
+  if (items.length === 0) { el.destacadosList.innerHTML = '<p style="text-align:center;padding:20px;color:#999">No hay destacados</p>'; }
+  else {
+    items.forEach(function(d) {
+      var card = document.createElement('div'); card.className = 'destacado-card';
+      card.innerHTML = '<div class="destacado-card-text">' + escapeHtml(d.texto || '') + '</div><span class="destacado-card-time">' + timeAgo(d.timestamp) + '</span>';
+      card.addEventListener('click', function() { scrollToMessage(d.id); hideDestacadosModal(); });
+      el.destacadosList.appendChild(card);
     });
-  });
-  ['dragleave', 'drop'].forEach(ev => {
-    chatContainer.addEventListener(ev, (e) => {
-      e.preventDefault();
-      dragDropOverlay.classList.add('hidden');
-      dragDropOverlay.style.display = 'none';
+  }
+  el.destacadosModal.style.display = 'flex';
+}
+function hideDestacadosModal() { if (el.destacadosModal) el.destacadosModal.style.display = 'none'; }
+function scrollToMessage(msgId) {
+  var w = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
+  if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); w.classList.add('highlight-flash'); setTimeout(function(){ w.classList.remove('highlight-flash'); }, 2000); }
+}
+
+/* DRAG & DROP */
+function handleDragOver(e) { e.preventDefault(); var o = document.getElementById('drag-drop-overlay'); if (o) o.style.display = 'flex'; }
+function handleDragLeave() { var o = document.getElementById('drag-drop-overlay'); if (o) o.style.display = 'none'; }
+function handleDrop(e) {
+  e.preventDefault(); var o = document.getElementById('drag-drop-overlay'); if (o) o.style.display = 'none';
+  var files = e.dataTransfer.files;
+  if (files.length > 0) { var imgs = Array.from(files).filter(function(f){ return f.type.startsWith('image/'); }); if (imgs.length > 0) showImagePreviewModal(imgs); }
+}
+
+
+/* ============================================
+   DOMContentLoaded - ALL EVENT LISTENERS
+   ============================================ */
+document.addEventListener('DOMContentLoaded', function() {
+  el = {
+    messagesContainer: document.getElementById('messages-container'),
+    welcomeMessage: document.getElementById('welcome-message'),
+    chatForm: document.getElementById('chat-form'),
+    messageInput: document.getElementById('message-input'),
+    sendBtn: document.getElementById('send-btn'),
+    emojiBtn: document.getElementById('emoji-btn'),
+    emojiPicker: document.getElementById('emoji-picker'),
+    imageBtn: document.getElementById('image-btn'),
+    imageInputCamera: document.getElementById('image-input-camera'),
+    imageInputGallery: document.getElementById('image-input-gallery'),
+    imageOptionsModal: document.getElementById('image-options-modal'),
+    imagePreviewModal: document.getElementById('image-preview-modal'),
+    imagePreviewContainer: document.getElementById('image-preview-container'),
+    imageCaptionInput: document.getElementById('image-caption-input'),
+    userBadge: document.getElementById('user-badge'),
+    pendingIndicator: document.getElementById('pending-indicator'),
+    voiceBtn: document.getElementById('voice-btn'),
+    voiceIndicator: document.getElementById('voice-recording-indicator'),
+    voiceRecTime: document.getElementById('voice-rec-time'),
+    pinnedBtn: document.getElementById('pinned-btn'),
+    pinnedBanner: document.getElementById('pinned-banner'),
+    pinnedCount: document.getElementById('pinned-count'),
+    pinnedList: document.getElementById('pinned-list'),
+    pinnedCloseBtn: document.getElementById('pinned-close-btn'),
+    settingsBtn: document.getElementById('settings-btn'),
+    settingsModal: document.getElementById('settings-modal'),
+    settingsCloseBtn: document.getElementById('settings-close-btn'),
+    refreshBtn: document.getElementById('refresh-btn'),
+    editModal: document.getElementById('edit-modal'),
+    editInput: document.getElementById('edit-input'),
+    editCancelBtn: document.getElementById('edit-cancel-btn'),
+    editSaveBtn: document.getElementById('edit-save-btn'),
+    searchToggleBtn: document.getElementById('search-toggle-btn'),
+    searchBar: document.getElementById('search-bar'),
+    searchInput: document.getElementById('search-input'),
+    searchCloseBtn: document.getElementById('search-close-btn'),
+    replyPreview: document.getElementById('reply-preview'),
+    offlineBanner: document.getElementById('offline-banner'),
+    scrollToBottomBtn: document.getElementById('scroll-to-bottom-btn'),
+    reactionPicker: document.getElementById('reaction-picker'),
+    reactionPickerContent: document.querySelector('#reaction-picker .reaction-picker-content'),
+    chatInputArea: document.querySelector('.chat-input-area'),
+    loginScreen: document.getElementById('login-screen'),
+    loginForm: document.getElementById('login-form'),
+    loginPassword: document.getElementById('login-password'),
+    loginError: document.getElementById('login-error'),
+    loginSubmitBtn: document.getElementById('login-submit-btn'),
+    chatContainer: document.getElementById('chat-container'),
+    pairingModal: document.getElementById('pairing-modal'),
+    logoutBtn: document.getElementById('logout-btn'),
+    profileAvatar: document.getElementById('profile-avatar'),
+    profileAvatarInput: document.getElementById('profile-avatar-input'),
+    profileNameInput: document.getElementById('profile-name-input'),
+    profileBioInput: document.getElementById('profile-bio-input'),
+    profileSaveBtn: document.getElementById('profile-save-btn'),
+    profileCancelBtn: document.getElementById('profile-cancel-btn'),
+    partnerProfileAvatar: document.getElementById('partner-profile-avatar'),
+    partnerProfileName: document.getElementById('partner-profile-name'),
+    partnerProfileBio: document.getElementById('partner-profile-bio'),
+    headerPartnerImg: document.getElementById('header-partner-img'),
+    headerPartnerInitial: document.getElementById('header-partner-initial'),
+    themeSelect: document.getElementById('theme-select'),
+    myDestacadosBtn: document.getElementById('my-destacados-btn'),
+    partnerDestacadosBtn: document.getElementById('partner-destacados-btn'),
+    destacadosModal: document.getElementById('destacados-modal'),
+    destacadosCloseBtn: document.getElementById('destacados-close-btn'),
+    destacadosList: document.getElementById('destacados-list'),
+    destacadosCount: document.getElementById('destacados-count'),
+    partnerDestacadosStatus: document.getElementById('partner-destacados-status'),
+    shareDestacadosToggle: document.getElementById('share-destacados-toggle'),
+    statTotal: document.getElementById('stat-total'),
+    statMine: document.getElementById('stat-mine'),
+    statPartner: document.getElementById('stat-partner'),
+    statImages: document.getElementById('stat-images'),
+    statAudios: document.getElementById('stat-audios'),
+    optionCamera: document.getElementById('option-camera'),
+    optionGallery: document.getElementById('option-gallery'),
+    imageOptionsCancel: document.getElementById('image-options-cancel'),
+    previewCloseBtn: document.getElementById('preview-close-btn'),
+    previewCancelBtn: document.getElementById('preview-cancel-btn'),
+    previewSendBtn: document.getElementById('preview-send-btn')
+  };
+
+  auth.setPersistence(firebase.auth.Auth.Persistence.NONE);
+  initTheme();
+
+  /* STATIC ICONS */
+  renderIcon(document.querySelector('.welcome-icon'), 'messageCircle');
+  renderIcon(document.querySelector('.drag-drop-icon'), 'upload');
+  renderIcon(document.querySelector('.scroll-icon'), 'arrowDown');
+  renderIcon(el.imageBtn && el.imageBtn.querySelector('.btn-media-inner'), 'image');
+  renderIcon(el.pinnedBtn && el.pinnedBtn.querySelector('.btn-icon-inner'), 'pin');
+  renderIcon(el.searchToggleBtn && el.searchToggleBtn.querySelector('.btn-icon-inner'), 'search');
+  renderIcon(el.settingsBtn && el.settingsBtn.querySelector('.btn-icon-inner'), 'settings');
+  renderIcon(el.refreshBtn && el.refreshBtn.querySelector('.btn-icon-inner'), 'sync');
+  renderIcon(el.settingsCloseBtn && el.settingsCloseBtn.querySelector('.btn-icon'), 'close');
+  renderIcon(el.emojiBtn && el.emojiBtn.querySelector('.btn-emoji-inner'), 'emoji');
+  renderIcon(el.voiceBtn && el.voiceBtn.querySelector('.btn-voice-inner'), 'mic');
+  renderIcon(el.sendBtn && el.sendBtn.querySelector('.btn-send-inner'), 'send');
+  renderIcon(el.pinnedCloseBtn && el.pinnedCloseBtn.querySelector('span'), 'close');
+  renderIcon(el.searchCloseBtn && el.searchCloseBtn.querySelector('span'), 'close');
+  var rpi = el.replyPreview && el.replyPreview.querySelector('.reply-preview-close span');
+  if (rpi) renderIcon(rpi, 'close');
+
+  /* LOGIN */
+  if (el.loginForm) el.loginForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var pw = el.loginPassword ? el.loginPassword.value.trim() : '';
+    if (!pw) { if (el.loginError) { el.loginError.textContent = 'Ingresa la clave'; el.loginError.style.display = 'block'; } return; }
+    if (el.loginError) el.loginError.style.display = 'none';
+    if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = true; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrando...'; }
+    var matched = null;
+    for (var k in ACCOUNTS) { if (ACCOUNTS[k].password === pw) { matched = ACCOUNTS[k]; break; } }
+    if (!matched) {
+      if (el.loginError) { el.loginError.textContent = 'Clave incorrecta'; el.loginError.style.display = 'block'; }
+      if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
+      if (el.loginPassword) el.loginPassword.value = '';
+      return;
+    }
+    auth.signInWithEmailAndPassword(matched.email, matched.password).catch(function(err) {
+      console.error('Login error:', err);
+      if (el.loginError) { el.loginError.textContent = 'Clave incorrecta'; el.loginError.style.display = 'block'; }
+      if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
+      if (el.loginPassword) el.loginPassword.value = '';
     });
   });
 
-  chatContainer.addEventListener('drop', (e) => {
-    const file = e.dataTransfer.files[0];
-    if (file?.type.startsWith('image/')) {
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      elements.imageInput.files = dt.files;
-      elements.imageInput.dispatchEvent(new Event('change'));
-    }
+  auth.onAuthStateChanged(function(user) { checkUserAccess(user); });
+  tryAutoLogin();
+
+  /* CHAT FORM */
+  if (el.chatForm) el.chatForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var text = el.messageInput ? el.messageInput.value.trim() : '';
+    if (!text || !currentUser) return;
+    el.messageInput.value = '';
+    sendMessage(text, null, null);
   });
-}
+  if (el.sendBtn) el.sendBtn.addEventListener('click', function(e) { e.preventDefault(); if (el.chatForm) el.chatForm.requestSubmit(); });
+  if (el.messageInput) el.messageInput.addEventListener('input', handleTypingInput);
 
-// ============================================
-// UTILIDADES
-// ============================================
-function openLightbox(url) {
-  lightboxImg.src = url;
-  lightbox.classList.remove('hidden');
-  lightbox.style.display = 'flex';
-}
+  /* IMAGES */
+  if (el.imageBtn) el.imageBtn.addEventListener('click', showImageOptionsModal);
+  if (el.optionCamera) el.optionCamera.addEventListener('click', function() { hideImageOptionsModal(); if (el.imageInputCamera) el.imageInputCamera.click(); });
+  if (el.optionGallery) el.optionGallery.addEventListener('click', function() { hideImageOptionsModal(); if (el.imageInputGallery) el.imageInputGallery.click(); });
+  if (el.imageOptionsCancel) el.imageOptionsCancel.addEventListener('click', hideImageOptionsModal);
+  if (el.imageInputCamera) el.imageInputCamera.addEventListener('change', function(e) { if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
+  if (el.imageInputGallery) el.imageInputGallery.addEventListener('change', function(e) { if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
+  if (el.previewSendBtn) el.previewSendBtn.addEventListener('click', sendPendingImages);
+  if (el.previewCancelBtn) el.previewCancelBtn.addEventListener('click', hideImagePreviewModal);
+  if (el.previewCloseBtn) el.previewCloseBtn.addEventListener('click', hideImagePreviewModal);
 
-// ============================================
-// INICIALIZACIÓN DE ICONOS ESTÁTICOS
-// ============================================
-initStaticIcons();
-initTheme();
+  /* VOICE */
+  var voiceTimer = null;
+  if (el.voiceBtn) {
+    el.voiceBtn.addEventListener('mousedown', function() { voiceTimer = setTimeout(startVoiceRecording, 300); });
+    el.voiceBtn.addEventListener('mouseup', function() { clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
+    el.voiceBtn.addEventListener('mouseleave', function() { clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
+    el.voiceBtn.addEventListener('touchstart', function(e) { e.preventDefault(); voiceTimer = setTimeout(startVoiceRecording, 300); }, { passive: false });
+    el.voiceBtn.addEventListener('touchend', function(e) { e.preventDefault(); clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
+  }
+  var vrc = document.getElementById('voice-rec-cancel-btn');
+  if (vrc) vrc.addEventListener('click', cancelVoiceRecording);
 
-// ============================================
-// LIMPIEZA
-// ============================================
-window.addEventListener('beforeunload', () => {
-  if (unsubscribe) unsubscribe();
-  if (pinnedUnsubscribe) pinnedUnsubscribe();
-  if (typingUnsubscribe) typingUnsubscribe();
-  state.reactionUnsubscribes.forEach(unsub => unsub());
-  state.reactionUnsubscribes.clear();
+  /* EMOJI */
+  if (el.emojiBtn) el.emojiBtn.addEventListener('click', toggleEmojiPicker);
+
+  /* SEARCH */
+  if (el.searchToggleBtn) el.searchToggleBtn.addEventListener('click', toggleSearch);
+  if (el.searchInput) el.searchInput.addEventListener('input', function(e) { filterMessages(e.target.value); });
+  if (el.searchCloseBtn) el.searchCloseBtn.addEventListener('click', toggleSearch);
+
+  /* REPLY PREVIEW */
+  if (el.replyPreview) { var rpx = el.replyPreview.querySelector('.reply-preview-close'); if (rpx) rpx.addEventListener('click', clearReplyPreview); }
+
+  /* EDIT MODAL */
+  if (el.editCancelBtn) el.editCancelBtn.addEventListener('click', closeEditModal);
+  if (el.editSaveBtn) el.editSaveBtn.addEventListener('click', saveEdit);
+  if (el.editModal) el.editModal.addEventListener('click', function(e) { if (e.target === el.editModal) closeEditModal(); });
+
+  /* PINNED */
+  if (el.pinnedBtn) el.pinnedBtn.addEventListener('click', function() {
+    if (pinnedMessages.length > 0) scrollToMessage(pinnedMessages[0].id);
+  });
+  if (el.pinnedCloseBtn) el.pinnedCloseBtn.addEventListener('click', function() {
+    db.collection('rooms').doc(ROOM_ID).set({ pinnedMessages: [] }, { merge: true }).catch(function(){});
+  });
+
+  /* SETTINGS */
+  if (el.settingsBtn) el.settingsBtn.addEventListener('click', openSettingsModal);
+  if (el.settingsCloseBtn) el.settingsCloseBtn.addEventListener('click', closeSettingsModal);
+  if (el.settingsModal) el.settingsModal.addEventListener('click', function(e) { if (e.target === el.settingsModal) closeSettingsModal(); });
+  if (el.refreshBtn) el.refreshBtn.addEventListener('click', refreshApp);
+  if (el.logoutBtn) el.logoutBtn.addEventListener('click', function() { cleanupListeners(); auth.signOut().then(function() { showLoginScreen(); }); });
+
+  /* PROFILE */
+  if (el.profileSaveBtn) el.profileSaveBtn.addEventListener('click', saveProfile);
+  if (el.profileCancelBtn) el.profileCancelBtn.addEventListener('click', updateMyProfileUI);
+  if (el.profileAvatar) el.profileAvatar.addEventListener('click', function() { if (el.profileAvatarInput) el.profileAvatarInput.click(); });
+  if (el.profileAvatarInput) el.profileAvatarInput.addEventListener('change', function(e) {
+    var file = e.target.files[0]; if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) { myProfile.avatarBase64 = ev.target.result; updateMyProfileUI(); };
+    reader.readAsDataURL(file);
+  });
+
+  /* DESTACADOS */
+  if (el.myDestacadosBtn) el.myDestacadosBtn.addEventListener('click', function() { showDestacadosModal('my'); });
+  if (el.partnerDestacadosBtn) el.partnerDestacadosBtn.addEventListener('click', function() { showDestacadosModal('partner'); });
+  if (el.destacadosCloseBtn) el.destacadosCloseBtn.addEventListener('click', hideDestacadosModal);
+  if (el.destacadosModal) el.destacadosModal.addEventListener('click', function(e) { if (e.target === el.destacadosModal) hideDestacadosModal(); });
+  if (el.shareDestacadosToggle) el.shareDestacadosToggle.addEventListener('change', toggleShareDestacados);
+
+  /* SCROLL */
+  if (el.scrollToBottomBtn) el.scrollToBottomBtn.addEventListener('click', scrollToBottom);
+  if (el.messagesContainer) el.messagesContainer.addEventListener('scroll', function() { if (isUserAtBottom()) { unreadCount = 0; updateScrollButton(); } });
+
+  /* DRAG & DROP */
+  if (el.messagesContainer) {
+    el.messagesContainer.addEventListener('dragover', handleDragOver);
+    el.messagesContainer.addEventListener('dragleave', handleDragLeave);
+    el.messagesContainer.addEventListener('drop', handleDrop);
+  }
+
+  /* CLOSE MENUS ON CLICK OUTSIDE */
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.custom-context-menu') && !e.target.closest('.message-wrapper')) closeAllMenus();
+    if (!e.target.closest('#reaction-picker') && !e.target.closest('.reaction-bubble') && !e.target.closest('.reaction-item')) { 
+      closeReactionPicker();
+    }
+    if (!e.target.closest('#emoji-picker') && !e.target.closest('#emoji-btn')) { if (el.emojiPicker) el.emojiPicker.classList.add('hidden'); }
+  });
+
+  /* KEYBOARD */
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      closeAllMenus();
+      closeReactionPicker();
+      if (el.emojiPicker) el.emojiPicker.classList.add('hidden');
+      if (el.imageOptionsModal) el.imageOptionsModal.style.display = 'none';
+      if (el.imagePreviewModal) el.imagePreviewModal.style.display = 'none';
+      if (el.settingsModal) el.settingsModal.style.display = 'none';
+      if (el.editModal) el.editModal.style.display = 'none';
+      if (el.destacadosModal) el.destacadosModal.style.display = 'none';
+      document.querySelectorAll('.lightbox-overlay').forEach(function(o){ o.remove(); });
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); toggleSearch(); }
+  });
+
+  /* ONLINE/OFFLINE */
+  window.addEventListener('online', function() { isOnline = true; if (el.offlineBanner) el.offlineBanner.style.display = 'none'; flushOfflineQueue(); });
+  window.addEventListener('offline', function() { isOnline = false; if (el.offlineBanner) el.offlineBanner.style.display = 'flex'; });
+  if (!isOnline && el.offlineBanner) el.offlineBanner.style.display = 'flex';
+
+  /* THEME CHANGE */
+  if (el.themeSelect) el.themeSelect.addEventListener('change', function(e) { setTheme(e.target.value); });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+    var t = 'system'; try { t = localStorage.getItem('chatpareja_theme') || 'system'; } catch(e){} if (t === 'system') initTheme();
+  });
 });
+
+

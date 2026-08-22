@@ -2,3 +2,8 @@ node_modules/
 .firebase/
 .DS_Store
 *.tmp
+sync-config.json
+media/
+
+database.json
+cloudflared.exe

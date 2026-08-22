@@ -10,7 +10,10 @@
       "README.md",
       ".firebaserc",
       "firebase.json",
-      "storage.rules"
+      "storage.rules",
+      "sync-config.json",
+      "create-accounts.js",
+      "serviceAccountKey.json"
     ],
     "rewrites": [
       {

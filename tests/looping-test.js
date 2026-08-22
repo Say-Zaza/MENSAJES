@@ -15,8 +15,8 @@ async function runLoopingTest(iterations = 3) {
 
     try {
       // Step 1: Verificar Token de Auth
-      const token = await syncService.getAnonymousToken();
-      if (!token) throw new Error("Fallo al obtener token anónimo de Firebase");
+      const token = await syncService.getAuthToken();
+      if (!token) throw new Error("Fallo al obtener token de la cuenta de Firebase");
       console.log("  [1/5] ✅ Token de Firebase Auth obtenido correctamente.");
 
       // Step 2: Crear mensaje simulación de >5 días en Firebase

@@ -22,6 +22,37 @@ let dbFirestore = null;
 let pairingCache = new Map(); // uid -> { paired: boolean, expires: timestamp }
 const PAIRING_CACHE_TTL = 5 * 60 * 1000; // 5 min cache
 
+// Presencia en tiempo real: roomId -> Map<uid, { lastActive, state, assignedKey? }>
+const presenceByRoom = new Map();
+
+function setPresence(roomId, uid, data) {
+  if (!presenceByRoom.has(roomId)) presenceByRoom.set(roomId, new Map());
+  const map = presenceByRoom.get(roomId);
+  const prev = map.get(uid) || {};
+  const next = { ...prev, ...data };
+  map.set(uid, next);
+  return next;
+}
+
+function buildPresencePayload(roomId) {
+  const map = presenceByRoom.get(roomId) || new Map();
+  const db = syncService.readLocalDB();
+  const storedUsers = (db.users && db.users[roomId]) || {};
+  const users = {};
+  for (const [uid, p] of map.entries()) {
+    const prof = storedUsers[uid] || {};
+    users[uid] = {
+      lastActive: p.lastActive,
+      state: p.state,
+      assignedKey: prof.assignedKey || p.assignedKey || '',
+      username: prof.username || '',
+      avatarBase64: prof.avatarBase64 || '',
+      bio: prof.bio || ''
+    };
+  }
+  return { users };
+}
+
 try {
   const admin = require('firebase-admin');
   const serviceAccount = require('./serviceAccountKey.json');
@@ -32,6 +63,14 @@ try {
   console.log('🔥 Firebase Admin inicializado (modo backup)');
 } catch (err) {
   console.log('ℹ️ Firebase Admin SDK no configurado (usando SyncService REST API para respaldo local y purga de 5 días)');
+}
+
+// Helpers del Admin SDK para operar arrays (destacados)
+function firestoreFieldArrayUnion(value) {
+  return require('firebase-admin').firestore.FieldValue.arrayUnion(value);
+}
+function firestoreFieldArrayRemove(value) {
+  return require('firebase-admin').firestore.FieldValue.arrayRemove(value);
 }
 
 // Función para verificar emparejamiento en servidor
@@ -100,6 +139,31 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Destacados y ajustes (respaldo local; se sirven al cliente en modo socket)
+app.get('/api/destacados/:room', (req, res) => {
+  const db = syncService.readLocalDB();
+  const roomId = req.params.room || 'general';
+  res.json(db.destacados?.[roomId] || { user1: { items: [] }, user2: { items: [] } });
+});
+
+app.get('/api/settings/:room', (req, res) => {
+  const db = syncService.readLocalDB();
+  const roomId = req.params.room || 'general';
+  res.json(db.settings?.[roomId] || { user1: { shareDestacados: false }, user2: { shareDestacados: false } });
+});
+
+// Presencia y perfiles (modo socket): quién está conectado y datos de cada uno
+app.get('/api/presence/:room', (req, res) => {
+  const roomId = req.params.room || 'general';
+  res.json(buildPresencePayload(roomId));
+});
+
+app.get('/api/profile/:room', (req, res) => {
+  const db = syncService.readLocalDB();
+  const roomId = req.params.room || 'general';
+  res.json({ users: db.users?.[roomId] || {} });
+});
+
 app.get('/api/cleanup-db', (req, res) => {
   try {
     const db = syncService.readLocalDB();
@@ -146,6 +210,10 @@ io.on('connection', (socket) => {
     if (db.rooms[roomId] && db.rooms[roomId].length > 0) {
       socket.emit('chatHistory', db.rooms[roomId]);
     }
+    
+    // Marcar presencia online y avisar a la pareja
+    setPresence(roomId, uid, { lastActive: Date.now(), state: 'online' });
+    io.to(roomId).emit('presenceUpdate', buildPresencePayload(roomId));
   });
 
   socket.on('chatMessage', async (data) => {
@@ -165,9 +233,6 @@ io.on('connection', (socket) => {
       return;
     }
     
-    const db = syncService.readLocalDB();
-    if (!db.rooms[roomId]) db.rooms[roomId] = [];
-    
     const messageId = id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     const newMessage = { 
       id: messageId,
@@ -176,20 +241,57 @@ io.on('connection', (socket) => {
       timestamp: Date.now() 
     };
 
-    if (newMessage.imageBase64) {
-      const localMedia = syncService.saveMediaFileLocally(messageId, newMessage.imageBase64, newMessage.imageMimeType);
-      if (localMedia) newMessage.localMediaPath = localMedia;
-    }
-    
-    const existingIndex = db.rooms[roomId].findIndex(m => m.id === messageId);
-    if (existingIndex >= 0) {
-      db.rooms[roomId][existingIndex] = newMessage;
-    } else {
-      db.rooms[roomId].push(newMessage);
-    }
-    syncService.writeLocalDB(db);
-    
+    // BROADCAST INMEDIATO al partner (sin esperar escrituras)
     io.to(roomId).emit('newMessage', newMessage);
+
+    // Escrituras en background (fire-and-forget)
+    (async () => {
+      try {
+        const db = await syncService.readLocalDBAsync();
+        if (!db.rooms[roomId]) db.rooms[roomId] = [];
+
+        if (newMessage.imageBase64) {
+          const localMedia = syncService.saveMediaFileLocally(messageId, newMessage.imageBase64, newMessage.imageMimeType);
+          if (localMedia) newMessage.localMediaPath = localMedia;
+        }
+        
+        if (newMessage.audioBase64) {
+          const localMedia = syncService.saveAudioFileLocally(messageId, newMessage.audioBase64, newMessage.audioMimeType);
+          if (localMedia) newMessage.localAudioPath = localMedia;
+        }
+        
+        const existingIndex = db.rooms[roomId].findIndex(m => m.id === messageId);
+        if (existingIndex >= 0) {
+          db.rooms[roomId][existingIndex] = newMessage;
+        } else {
+          db.rooms[roomId].push(newMessage);
+        }
+        await syncService.writeLocalDBAsync(db);
+      } catch (e) {
+        console.error('❌ Error guardando mensaje local:', e.message);
+      }
+    })();
+
+    // Firestore write en background (fire-and-forget)
+    (async () => {
+      try {
+        if (dbFirestore) {
+          await dbFirestore.collection(`rooms/${roomId}/messages`).doc(messageId).set({
+            ...messageData,
+            uid,
+            timestamp: new Date(newMessage.timestamp),
+            localTimestamp: newMessage.timestamp
+          }, { merge: true });
+        } else {
+          const token = await syncService.getAuthToken();
+          if (token) {
+            await syncService.createFirestoreMessage(roomId, newMessage, token, messageId);
+          }
+        }
+      } catch (e) {
+        console.error('❌ Error escribiendo mensaje en Firestore:', e.message);
+      }
+    })();
   });
 
   socket.on('typing', ({ roomId, uid, username, isTyping }) => {
@@ -222,6 +324,121 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('editMessage', { messageId, texto, uid });
   });
 
+  socket.on('destacado', async ({ roomId, slot, action, message }) => {
+    if (!roomId || !slot || !message || (action !== 'add' && action !== 'remove')) return;
+    const snapshot = syncService.messageToSnapshot(message);
+
+    // Guardar en la PC (respaldo permanente)
+    const db = syncService.readLocalDB();
+    if (!db.destacados) db.destacados = {};
+    if (!db.destacados[roomId]) db.destacados[roomId] = {};
+    if (!db.destacados[roomId][slot]) db.destacados[roomId][slot] = { items: [] };
+    const items = db.destacados[roomId][slot].items;
+    const idx = items.findIndex(i => i.messageId === snapshot.messageId);
+    if (action === 'add') {
+      if (idx >= 0) items[idx] = snapshot; else items.push(snapshot);
+    } else {
+      if (idx >= 0) items.splice(idx, 1);
+    }
+    syncService.writeLocalDB(db);
+
+    // Replicar a Firestore (no se purga: vive en rooms/{roomId}/destacados)
+    try {
+      if (dbFirestore) {
+        const ref = dbFirestore.collection(`rooms/${roomId}/destacados`).doc(slot);
+        if (action === 'add') {
+          await ref.set({ items: firestoreFieldArrayUnion(snapshot) }, { merge: true });
+        } else {
+          await ref.set({ items: firestoreFieldArrayRemove(snapshot) }, { merge: true });
+        }
+      } else {
+        const token = await syncService.getAuthToken();
+        if (token) await syncService.setDestacadosItem(roomId, slot, action, snapshot, token);
+      }
+    } catch (e) {
+      console.error('❌ Error replicando destacado a Firestore:', e.message);
+    }
+
+    io.to(roomId).emit('destacadoUpdated', { slot, action, message: snapshot });
+  });
+
+  socket.on('settingsShare', async ({ roomId, slot, shareDestacados }) => {
+    if (!roomId || !slot) return;
+    const db = syncService.readLocalDB();
+    if (!db.settings) db.settings = {};
+    if (!db.settings[roomId]) db.settings[roomId] = {};
+    db.settings[roomId][slot] = { shareDestacados: !!shareDestacados };
+    syncService.writeLocalDB(db);
+
+    try {
+      if (dbFirestore) {
+        await dbFirestore.collection(`rooms/${roomId}/settings`).doc(slot).set(
+          { shareDestacados: !!shareDestacados },
+          { merge: true }
+        );
+      } else {
+        const token = await syncService.getAuthToken();
+        if (token) await syncService.setSettingsDoc(roomId, slot, !!shareDestacados, token);
+      }
+    } catch (e) {
+      console.error('❌ Error replicando settings a Firestore:', e.message);
+    }
+
+    io.to(roomId).emit('settingsUpdated', { slot, shareDestacados: !!shareDestacados });
+  });
+
+  // Presencia: latido periódico del cliente
+  socket.on('presenceBeat', ({ roomId, uid, state, assignedKey, username }) => {
+    if (!roomId || !uid) return;
+    setPresence(roomId, uid, { lastActive: Date.now(), state: state || 'online', assignedKey: assignedKey || '' });
+    if (assignedKey) {
+      const db = syncService.readLocalDB();
+      if (!db.users) db.users = {};
+      if (!db.users[roomId]) db.users[roomId] = {};
+      const existing = db.users[roomId][uid] || {};
+      if (existing.assignedKey !== assignedKey || (username && existing.username !== username)) {
+        db.users[roomId][uid] = { ...existing, assignedKey, username: username || existing.username || '' };
+        syncService.writeLocalDB(db);
+      }
+    }
+    io.to(roomId).emit('presenceUpdate', buildPresencePayload(roomId));
+  });
+
+  // Perfil: guardar en la PC, replicar a Firestore y avisar a la pareja
+  socket.on('profileUpdate', async ({ roomId, uid, assignedKey, profile }) => {
+    if (!roomId || !uid || !profile) return;
+    const db = syncService.readLocalDB();
+    if (!db.users) db.users = {};
+    if (!db.users[roomId]) db.users[roomId] = {};
+    db.users[roomId][uid] = {
+      username: (profile.username || '').trim(),
+      avatarBase64: profile.avatarBase64 || '',
+      bio: (profile.bio || '').trim(),
+      assignedKey: assignedKey || (db.users[roomId][uid] || {}).assignedKey || '',
+      updatedAt: Date.now()
+    };
+    syncService.writeLocalDB(db);
+
+    try {
+      if (dbFirestore) {
+        await dbFirestore.collection(`rooms/${roomId}/users`).doc(uid).set({
+          username: db.users[roomId][uid].username,
+          avatarBase64: db.users[roomId][uid].avatarBase64 || null,
+          bio: db.users[roomId][uid].bio
+        }, { merge: true });
+      } else {
+        const token = await syncService.getAuthToken();
+        if (token) await syncService.setProfileDoc(roomId, uid, db.users[roomId][uid], token);
+      }
+    } catch (e) {
+      console.error('❌ Error replicando perfil a Firestore:', e.message);
+    }
+
+    setPresence(roomId, uid, { lastActive: Date.now(), state: 'online', assignedKey: db.users[roomId][uid].assignedKey });
+    io.to(roomId).emit('profileUpdated', { uid, profile: db.users[roomId][uid] });
+    io.to(roomId).emit('presenceUpdate', buildPresencePayload(roomId));
+  });
+
   socket.on('cleanupRoom', ({ roomId }) => {
     if (!roomId) return;
     io.to(roomId).emit('roomCleared');
@@ -229,6 +446,10 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('❌ Usuario desconectado:', socket.id);
+    if (socketUid) {
+      setPresence('general', socketUid, { lastActive: Date.now(), state: 'offline' });
+      io.to('general').emit('presenceUpdate', buildPresencePayload('general'));
+    }
   });
 });
 

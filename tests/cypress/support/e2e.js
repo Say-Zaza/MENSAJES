@@ -36,8 +36,19 @@ Cypress.Commands.add('cleanupFirestore', { prevSubject: false }, () => {
   });
 });
 
-Cypress.Commands.add('waitForReady', () => {
-  cy.get('#user-badge').should('not.contain', 'Desconectado');
+Cypress.Commands.add('login', (key = 'user1') => {
+  cy.readFile('sync-config.json').then((cfg) => {
+    const email = key === 'user1' ? cfg.user1Email : cfg.user2Email;
+    const password = key === 'user1' ? cfg.user1Password : cfg.user2Password;
+    cy.window().then((win) => {
+      return win.auth.signInWithEmailAndPassword(email, password);
+    });
+  });
+});
+
+Cypress.Commands.add('waitForReady', (key = 'user1') => {
+  cy.login(key);
+  cy.get('#user-badge', { timeout: 20000 }).should('not.contain', 'Desconectado');
   cy.get('#message-input').should('not.be.disabled');
   cy.get('#send-btn').should('not.be.disabled');
 });
@@ -57,14 +68,6 @@ Cypress.on('uncaught:exception', (err, runnable) => {
 const FIREBASE_API_KEY = 'AIzaSyALVjHZtbEJGAx2pswt4l4h654ieGJw_tk';
 const FIREBASE_PROJECT_ID = 'mensajes-31f68';
 const ROOM_ID = 'general';
-
-Cypress.Commands.add('switchUser', (key) => {
-  cy.window().then((win) => {
-    win.localStorage.setItem('assigned_user', key);
-  });
-  cy.reload();
-  cy.waitForReady();
-});
 
 Cypress.Commands.add('getPartnerToken', () => {
   return cy.request({
