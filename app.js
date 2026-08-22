@@ -473,17 +473,29 @@ function updateHeaderBadge(partnerOnline) {
 }
 
 /* ============================================
-    PINNED MESSAGES (up to 4)
+    PINNED MESSAGES (max 3) — atómicos via arrayUnion/arrayRemove
     ============================================ */
+var MAX_PINNED = 3;
 var pinnedMessages = [];
+var pinnedIndex = 0;
 var PINNED_DISMISS_KEY = 'chatpareja_pins_dismissed_' + ROOM_ID;
 var pinnedDismissedSig = null;
 try { pinnedDismissedSig = sessionStorage.getItem(PINNED_DISMISS_KEY); } catch(e){}
 function pinnedSignature() { return pinnedMessages.map(function(p){ return p.id; }).join(','); }
+function currentPin() { return pinnedMessages[pinnedIndex] || null; }
 function setPinnedBannerVisible(visible) {
-  if (!el.pinnedBanner) return;
-  el.pinnedBanner.classList.toggle('hidden', !visible);
-  el.pinnedBanner.style.display = visible ? 'flex' : 'none';
+  if (!el.pinnedBanner || el.pinnedBanner.classList.contains('hidden') === !visible) return;
+  if (!visible) {
+    el.pinnedBanner.classList.add('hiding');
+    setTimeout(function() {
+      el.pinnedBanner.classList.add('hidden');
+      el.pinnedBanner.classList.remove('hiding');
+      el.pinnedBanner.style.display = 'none';
+    }, 180);
+  } else {
+    el.pinnedBanner.classList.remove('hidden', 'hiding');
+    el.pinnedBanner.style.display = 'flex';
+  }
 }
 function startPinnedListener() {
   if (pinnedUnsubscribe) pinnedUnsubscribe();
@@ -494,6 +506,19 @@ function startPinnedListener() {
     pinnedMessages = Array.isArray(data.pinnedMessages) ? data.pinnedMessages : [];
     pinnedMessages.forEach(function(p){ touchedIds.add(p.id); });
     anniversaryDate = typeof data.anniversary === 'string' ? data.anniversary : '';
+    // Auto-desfijar huérfanos: mensaje eliminado o purgado por sync-service
+    if (firstSnapshotReceived && allMessages.length > 0) {
+      var orphans = pinnedMessages.filter(function(p) {
+        return !allMessages.some(function(m){ return m.id === p.id; });
+      });
+      if (orphans.length) {
+        var orphanIds = new Set(orphans.map(function(p){ return p.id; }));
+        orphans.forEach(function(p){ unpinMessage(p.id, true); });
+        pinnedMessages = pinnedMessages.filter(function(p){ return !orphanIds.has(p.id); });
+        touchedIds = new Set(Array.from(touchedIds).filter(function(id){ return !orphanIds.has(id); }));
+      }
+    }
+    if (pinnedIndex >= pinnedMessages.length) pinnedIndex = 0;
     renderAnniversaryChip();
     renderPinnedBanner();
     touchedIds.forEach(function(mid) {
@@ -502,58 +527,81 @@ function startPinnedListener() {
     });
   }, function(){});
 }
-async function renderPinnedBanner() {
+async function pinMessage(msgId, text, autor) {
+  if (!currentUser || !msgId) return;
+  if (pinnedMessages.some(function(p){ return p.id === msgId; })) return;
+  if (pinnedMessages.length >= MAX_PINNED) {
+    showError('Ya tenés ' + MAX_PINNED + ' mensajes fijados, desfijá uno para continuar');
+    return;
+  }
+  var srcMsg = allMessages.find(function(m){ return m.id === msgId; }) || {};
+  var cipher = await encryptText((text || '').substring(0, 200));
+  var newPin = {
+    id: msgId,
+    texto: cipher,
+    autor: autor || '',
+    pinnedAt: Date.now(),
+    pinnedByUid: currentUser.uid,
+    pinnedByName: username || '',
+    hasImage: !!(srcMsg.imageBase64 || srcMsg.imageGifUrl),
+    hasAudio: !!srcMsg.audioBase64
+  };
+  // arrayUnion es atómico en servidor: fijados simultáneos no se pisan
+  db.collection('rooms').doc(ROOM_ID).set({
+    pinnedMessages: firebase.firestore.FieldValue.arrayUnion(newPin)
+  }, { merge: true })
+    .then(function(){ showSuccess('Mensaje fijado \uD83D\uDCCC'); })
+    .catch(function(err) { console.error('Pin error:', err); showError('Error al fijar'); });
+}
+function unpinMessage(msgId, silent) {
+  var obj = pinnedMessages.find(function(p){ return p.id === msgId; });
+  if (!obj) return;
+  db.collection('rooms').doc(ROOM_ID).set({
+    pinnedMessages: firebase.firestore.FieldValue.arrayRemove(obj)
+  }, { merge: true })
+    .then(function(){ if (!silent) showSuccess('Mensaje desfijado'); })
+    .catch(function(err) { console.error('Unpin error:', err); if (!silent) showError('Error al desfijar'); });
+}
+function renderPinnedBanner() {
   var count = pinnedMessages.length;
-  if (el.pinnedCount) el.pinnedCount.textContent = count;
   var sig = pinnedSignature();
   if (count === 0) {
     pinnedDismissedSig = null;
     try { sessionStorage.removeItem(PINNED_DISMISS_KEY); } catch(e){}
     setPinnedBannerVisible(false);
     if (el.pinnedPreview) el.pinnedPreview.textContent = '';
+    if (el.pinnedCounter) el.pinnedCounter.classList.add('hidden');
+    if (el.pinnedPrevBtn) el.pinnedPrevBtn.classList.add('hidden');
+    if (el.pinnedNextBtn) el.pinnedNextBtn.classList.add('hidden');
     return;
   }
   if (sig === pinnedDismissedSig) { setPinnedBannerVisible(false); return; }
   setPinnedBannerVisible(true);
-  var resolved = await Promise.all(pinnedMessages.map(async function(p) {
-    return { p: p, texto: isEncryptedText(p.texto) ? await decryptText(p.texto) : (p.texto || '[Mensaje]') };
-  }));
-  if (el.pinnedPreview) el.pinnedPreview.textContent = resolved[0] ? (' ' + resolved[0].texto).substring(0, 90) : '';
-  if (!el.pinnedList) return;
-  el.pinnedList.innerHTML = '';
-  resolved.forEach(function(it) {
-    var item = document.createElement('div');
-    item.className = 'pinned-item';
-    var textSpan = document.createElement('span');
-    textSpan.className = 'pinned-item-text';
-    textSpan.textContent = (it.p.autor ? it.p.autor + ': ' : '') + it.texto;
-    textSpan.addEventListener('click', function() { scrollToMessage(it.p.id); });
-    var unpinBtn = document.createElement('button');
-    unpinBtn.className = 'pinned-unpin-btn';
-    unpinBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-    unpinBtn.setAttribute('aria-label', 'Dejar de fijar');
-    unpinBtn.addEventListener('click', function(e) { e.stopPropagation(); unpinMessage(it.p.id); });
-    item.appendChild(textSpan);
-    item.appendChild(unpinBtn);
-    el.pinnedList.appendChild(item);
-  });
+  var multi = count > 1;
+  if (el.pinnedPrevBtn) el.pinnedPrevBtn.classList.toggle('hidden', !multi);
+  if (el.pinnedNextBtn) el.pinnedNextBtn.classList.toggle('hidden', !multi);
+  if (el.pinnedCounter) {
+    el.pinnedCounter.textContent = (pinnedIndex + 1) + '/' + count;
+    el.pinnedCounter.classList.toggle('hidden', !multi);
+  }
+  var pin = currentPin();
+  if (!pin || !el.pinnedPreview) return;
+  el.pinnedPreview.textContent = '\u2026';
+  fillPinnedPreview(pin, count, sig);
 }
-async function pinMessage(msgId, text, autor) {
-  if (pinnedMessages.length >= 4) { showError('Maximo 4 mensajes fijados'); return; }
-  if (pinnedMessages.find(function(p){ return p.id === msgId; })) { showError('Ya esta fijado'); return; }
-  var cipher = await encryptText((text || '').substring(0, 200));
-  var newPin = { id: msgId, texto: cipher, autor: autor || '', pinnedAt: Date.now() };
-  var updated = pinnedMessages.concat([newPin]);
-  db.collection('rooms').doc(ROOM_ID).set({
-    pinnedMessages: updated, pinnedBy: currentUser.uid,
-    pinnedAt: firebase.firestore.FieldValue.serverTimestamp()
-  }, { merge: true }).catch(function(){ showError('Error al fijar'); });
-}
-function unpinMessage(msgId) {
-  var updated = pinnedMessages.filter(function(p){ return p.id !== msgId; });
-  db.collection('rooms').doc(ROOM_ID).set({
-    pinnedMessages: updated
-  }, { merge: true }).catch(function(){});
+async function fillPinnedPreview(pin, countAtCall, sigAtCall) {
+  var prefix = '';
+  var src = allMessages.find(function(m){ return m.id === pin.id; });
+  var isImg = pin.hasImage || (src && (src.imageBase64 || src.imageGifUrl));
+  var isAud = pin.hasAudio || (src && src.audioBase64);
+  if (isImg) prefix = '\uD83D\uDDBC\uFE0F ';
+  else if (isAud) prefix = '\uD83C\uDFA4 ';
+  var texto = isEncryptedText(pin.texto) ? await decryptText(pin.texto) : (pin.texto || '[Mensaje]');
+  // Guarda: si cambió la lista o el índice mientras decodificábamos, descartar
+  if (pinnedSignature() !== sigAtCall || countAtCall !== pinnedMessages.length) return;
+  if (currentPin() !== pin) return;
+  var by = pin.pinnedByName ? ' \u2014 por ' + pin.pinnedByName : '';
+  if (el.pinnedPreview) el.pinnedPreview.textContent = prefix + texto + by;
 }
 
 
@@ -671,6 +719,10 @@ function processFirestoreMessages(snapshot) {
     else if (change.type === 'removed') {
       var idx = allMessages.findIndex(function(m){ return m.id === msg.id; });
       if (idx >= 0) { allMessages.splice(idx, 1); hasRemovals = true; }
+      // Si el mensaje eliminado estaba fijado, desfijarlo automáticamente
+      if (pinnedMessages.some(function(p){ return p.id === msg.id; })) {
+        unpinMessage(msg.id, true);
+      }
     }
   });
   if (hasRemovals) renderMessagesList();
@@ -1689,9 +1741,12 @@ document.addEventListener('DOMContentLoaded', function() {
     voiceRecTime: document.getElementById('voice-rec-time'),
     pinnedBtn: document.getElementById('pinned-btn'),
     pinnedBanner: document.getElementById('pinned-banner'),
-    pinnedContent: document.getElementById('pinned-content'),
+    pinnedMain: document.getElementById('pinned-main'),
     pinnedPreview: document.getElementById('pinned-preview'),
-    pinnedCount: document.getElementById('pinned-count'),
+    pinnedCounter: document.getElementById('pinned-counter'),
+    pinnedPrevBtn: document.getElementById('pinned-prev-btn'),
+    pinnedNextBtn: document.getElementById('pinned-next-btn'),
+    pinnedUnpinBtn: document.getElementById('pinned-unpin-btn'),
     pinnedList: document.getElementById('pinned-list'),
     pinnedCloseBtn: document.getElementById('pinned-close-btn'),
     settingsBtn: document.getElementById('settings-btn'),
@@ -1907,12 +1962,36 @@ document.addEventListener('DOMContentLoaded', function() {
 
   /* PINNED */
   if (el.pinnedBtn) el.pinnedBtn.addEventListener('click', function() {
-    if (pinnedMessages.length > 0) { scrollToMessage(pinnedMessages[0].id); }
-    else if (el.pinnedBanner) setPinnedBannerVisible(false);
+    if (pinnedMessages.length > 0) {
+      pinnedDismissedSig = null;
+      try { sessionStorage.removeItem(PINNED_DISMISS_KEY); } catch(err){}
+      renderPinnedBanner();
+      scrollToMessage(currentPin().id);
+    } else if (el.pinnedBanner) setPinnedBannerVisible(false);
   });
-  if (el.pinnedContent) el.pinnedContent.addEventListener('click', function() {
-    if (!el.pinnedBanner || el.pinnedBanner.classList.contains('hidden')) return;
-    el.pinnedBanner.classList.toggle('expanded');
+  if (el.pinnedMain) el.pinnedMain.addEventListener('click', function() {
+    var pin = currentPin();
+    if (pin) scrollToMessage(pin.id);
+  });
+  if (el.pinnedMain) el.pinnedMain.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); var pin = currentPin(); if (pin) scrollToMessage(pin.id); }
+  });
+  if (el.pinnedPrevBtn) el.pinnedPrevBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (pinnedMessages.length < 2) return;
+    pinnedIndex = (pinnedIndex - 1 + pinnedMessages.length) % pinnedMessages.length;
+    renderPinnedBanner();
+  });
+  if (el.pinnedNextBtn) el.pinnedNextBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (pinnedMessages.length < 2) return;
+    pinnedIndex = (pinnedIndex + 1) % pinnedMessages.length;
+    renderPinnedBanner();
+  });
+  if (el.pinnedUnpinBtn) el.pinnedUnpinBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var pin = currentPin();
+    if (pin) unpinMessage(pin.id);
   });
   if (el.pinnedCloseBtn) el.pinnedCloseBtn.addEventListener('click', function(e) {
     e.stopPropagation();
@@ -2156,15 +2235,24 @@ function toggleGifPicker() {
   panel.className = 'gif-picker-panel';
   var head = document.createElement('div');
   head.className = 'gif-picker-head';
+  var title = document.createElement('span');
+  title.className = 'gif-picker-title';
+  title.textContent = 'GIFs';
   var search = document.createElement('input');
   search.type = 'search';
   search.placeholder = 'Buscar GIFs...';
   search.className = 'gif-picker-search';
+  search.setAttribute('autocomplete', 'off');
+  search.setAttribute('autocorrect', 'off');
+  search.setAttribute('autocapitalize', 'off');
+  search.setAttribute('spellcheck', 'false');
+  search.setAttribute('aria-label', 'Buscar GIFs');
   var closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'btn-icon';
   closeBtn.innerHTML = '\u2715';
   closeBtn.setAttribute('aria-label', 'Cerrar GIFs');
+  head.appendChild(title);
   head.appendChild(search);
   head.appendChild(closeBtn);
   var grid = document.createElement('div');
@@ -2179,14 +2267,22 @@ function toggleGifPicker() {
   document.body.appendChild(gifPickerOverlay);
 
   function loadFeed(q) {
-    grid.innerHTML = '<div class="gif-loading">Cargando\u2026</div>';
+    grid.innerHTML = '';
+    for (var s = 0; s < 9; s++) {
+      var skel = document.createElement('div');
+      skel.className = 'gif-skel';
+      grid.appendChild(skel);
+    }
     var key = getGiphyKey();
     var url = q
       ? 'https://api.giphy.com/v1/gifs/search?api_key=' + encodeURIComponent(key) + '&q=' + encodeURIComponent(q) + '&limit=24&rating=pg-13'
       : 'https://api.giphy.com/v1/gifs/trending?api_key=' + encodeURIComponent(key) + '&limit=24&rating=pg-13';
     fetch(url).then(function(r) { return r.json(); }).then(function(json) {
       grid.innerHTML = '';
-      if (!json.data || !json.data.length) { grid.innerHTML = '<div class="gif-loading">Sin resultados</div>'; return; }
+      if (!json.data || !json.data.length) {
+        grid.innerHTML = '<div class="gif-msg">' + (q ? 'Sin resultados para "' + escapeHtml(q) + '"' : 'No hay GIFs por ahora') + '</div>';
+        return;
+      }
       json.data.forEach(function(g) {
         var img = document.createElement('img');
         img.src = g.images.fixed_width.url;
@@ -2200,7 +2296,7 @@ function toggleGifPicker() {
         grid.appendChild(img);
       });
     }).catch(function() {
-      grid.innerHTML = '<div class="gif-loading">Error de red o API key inválida</div>';
+      grid.innerHTML = '<div class="gif-msg">Error de red — intentá de nuevo</div>';
     });
   }
   search.addEventListener('input', function() {

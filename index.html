@@ -104,21 +104,29 @@
       </div>
     </header>
 
-    <!-- Pinned Message Banner -->
+    <!-- Pinned Message Bar -->
     <div id="pinned-banner" class="pinned-banner hidden" role="status" aria-live="polite">
-      <span class="pinned-icon" aria-hidden="true"></span>
-      <div id="pinned-content" class="pinned-content">
-        <div class="pinned-header-row">
-          <span class="pinned-label">📌 Fijados (<span id="pinned-count">0</span>)</span>
-          <span id="pinned-preview" class="pinned-preview"></span>
-          <span id="pinned-chevron" class="pinned-chevron" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
-          </span>
-        </div>
-        <div id="pinned-list" class="pinned-list"></div>
+      <span class="pinned-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/></svg>
+      </span>
+      <button type="button" id="pinned-prev-btn" class="pinned-nav-btn hidden" aria-label="Fijado anterior">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div id="pinned-main" class="pinned-main" role="button" tabindex="0" aria-label="Ir al mensaje fijado">
+        <span class="pinned-meta-row">
+          <span class="pinned-label">Fijado</span>
+          <span id="pinned-counter" class="pinned-counter hidden"></span>
+        </span>
+        <span id="pinned-preview" class="pinned-preview"></span>
       </div>
-      <button type="button" id="pinned-close-btn" class="pinned-close" aria-label="Ocultar fijados">
-        <span aria-hidden="true"></span>
+      <button type="button" id="pinned-next-btn" class="pinned-nav-btn hidden" aria-label="Fijado siguiente">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      <button type="button" id="pinned-unpin-btn" class="pinned-action-btn" aria-label="Desfijar mensaje actual" title="Desfijar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+      </button>
+      <button type="button" id="pinned-close-btn" class="pinned-close" aria-label="Ocultar barra de fijados">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
 

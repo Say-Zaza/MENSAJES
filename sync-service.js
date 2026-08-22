@@ -399,6 +399,25 @@ function destacadosUrl(roomId, slot) {
 function settingsUrl(roomId, slot) {
   return `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/rooms/${roomId}/settings/${slot}`;
 }
+function roomUrl(roomId) {
+  return `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/rooms/${roomId}`;
+}
+
+async function getRoomDoc(roomId, token) {
+  try {
+    const response = await fetch(roomUrl(roomId), {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (response.status === 404) return { pinnedMessages: [] };
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const values = data.fields?.pinnedMessages?.arrayValue?.values || [];
+    return { pinnedMessages: values.map(v => restFieldsToSnapshot(v.mapValue?.fields || {})) };
+  } catch (err) {
+    console.error(`❌ [SyncService] Error leyendo doc de sala ${roomId}:`, err.message);
+    return { pinnedMessages: [] };
+  }
+}
 
 async function getDestacadosDoc(roomId, slot, token) {
   try {
@@ -613,8 +632,14 @@ async function runSyncAndPrune(roomId = "general") {
   }
 
   // SOLO DESPUÉS de guardar con éxito en disco, purgar de Firebase
+  // Los mensajes FIJADOS no se purgan (evita referencias huérfanas en pinnedMessages)
+  const roomDoc = await getRoomDoc(roomId, token);
+  const pinnedIds = new Set((roomDoc.pinnedMessages || []).map(p => p.id).filter(Boolean));
+  let skippedPinnedCount = 0;
+
   for (const remoteMsg of firestoreMessages) {
     const msgId = remoteMsg.id;
+    if (pinnedIds.has(msgId)) { skippedPinnedCount++; continue; }
     const msgAgeMs = now - (remoteMsg.timestamp || now);
     if (msgAgeMs > FIVE_DAYS_MS) {
       console.log(`🗑️ [SyncService] Mensaje ${msgId} (Antigüedad: ${(msgAgeMs / (1000 * 3600 * 24)).toFixed(1)} días) -> Eliminando de Firebase...`);
@@ -628,13 +653,15 @@ async function runSyncAndPrune(roomId = "general") {
   console.log(`✅ [SyncService] Sincronización completada con éxito:
      - Mensajes nuevos guardados localmente: ${downloadedCount}
      - Imágenes/archivos guardados en disco (${MEDIA_DIR}): ${mediaSavedCount}
-     - Mensajes antiguos (>5 días) eliminados de Firebase: ${deletedFromFirebaseCount}`);
+     - Mensajes antiguos (>5 días) eliminados de Firebase: ${deletedFromFirebaseCount}
+     - Mensajes fijados protegidos de la purga: ${skippedPinnedCount}`);
 
   return {
     success: true,
     downloadedCount,
     mediaSavedCount,
     deletedFromFirebaseCount,
+    skippedPinnedCount,
     totalLocalMessages: localDB.rooms[roomId].length
   };
 }
