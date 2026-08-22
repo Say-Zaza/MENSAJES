@@ -9,3 +9,5 @@ media/
 
 database.json
 cloudflared.exe
+
+firebase-debug.log
