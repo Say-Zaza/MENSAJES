@@ -556,6 +556,8 @@ body.dark-mode .chat-messages {
 .message-wrapper.self .message-meta { color: var(--color-time-self); }
 .message-wrapper.other .message-meta { color: var(--color-time-other); }
 .edited-badge { font-style: italic; opacity: 0.7; font-size: 0.6rem; }
+.msg-star { display: inline-flex; color: #f59e0b; margin-left: 3px; opacity: 0.9; }
+.msg-star svg { width: 12px; height: 12px; }
 
 /* ============================================
    IMAGEN EN MENSAJE

@@ -933,6 +933,13 @@ function buildBubbleContent(msg, bubble, isSelf) {
   ts.className = 'msg-time'; ts.textContent = formatTime(msg.timestamp);
   meta.appendChild(ts);
   if (msg.editedAt) { var eb = document.createElement('span'); eb.className = 'edited-badge'; eb.textContent = ' editado'; meta.appendChild(eb); }
+  if (myDestacadoIds.has(msg.id)) {
+    var stb = document.createElement('span');
+    stb.className = 'msg-star';
+    stb.title = 'Destacado';
+    stb.innerHTML = getIcon('starFilled');
+    meta.appendChild(stb);
+  }
   if (isSelf) {
     var se = document.createElement('span');
     var s = msg.status || 'sent';
@@ -1543,9 +1550,15 @@ function startDestacadosListeners() {
   var mySlot = getAssignedUser();
   if (!mySlot) return;
   db.collection(DESTACADOS_COLLECTION).doc(mySlot).collection('items').onSnapshot(function(snap) {
+    var touchedIds = [];
+    snap.docChanges().forEach(function(ch) { touchedIds.push(ch.doc.id); });
     myDestacados = []; myDestacadoIds = new Set();
     snap.forEach(function(doc) { var d = Object.assign({}, doc.data(), { id: doc.id }); myDestacados.push(d); myDestacadoIds.add(doc.id); });
     if (el.destacadosCount) el.destacadosCount.textContent = myDestacados.length > 0 ? myDestacados.length : '';
+    touchedIds.forEach(function(mid) {
+      var m = allMessages.find(function(x){ return x.id === mid; });
+      if (m) updateRenderedMessage(m);
+    });
   }, function(){});
   var partnerSlot = mySlot === 'user1' ? 'user2' : 'user1';
   db.collection(DESTACADOS_COLLECTION).doc(partnerSlot).collection('items').onSnapshot(function(snap) {
@@ -1587,16 +1600,12 @@ function toggleShareDestacados() {
   myShareDestacados = el.shareDestacadosToggle.checked;
   db.collection(SETTINGS_COLLECTION).doc(mySlot).set({ shareDestacados: myShareDestacados }, { merge: true }).catch(function(){});
 }
-/* Sub-paneles de Ajustes (destacados / wishlist): navegación con vuelta */
+/* Paneles sobre Ajustes (destacados / wishlist): overlay sin ocultar Ajustes */
 function enterSubPanel(panel) {
-  if (el.settingsModal) el.settingsModal.style.display = 'none';
   if (panel) panel.style.display = 'flex';
 }
-function exitSubPanel(panel, backToSettings) {
+function exitSubPanel(panel) {
   if (panel) panel.style.display = 'none';
-  if (backToSettings !== false && el.settingsModal && currentUser) {
-    el.settingsModal.style.display = 'flex';
-  }
 }
 async function showDestacadosModal(type) {
   if (!el.destacadosModal || !el.destacadosList) return;
@@ -1613,12 +1622,12 @@ async function showDestacadosModal(type) {
     resolved.forEach(function(it) {
       var card = document.createElement('div'); card.className = 'destacado-card';
       card.innerHTML = '<div class="destacado-card-text">' + escapeHtml(it.texto) + '</div><span class="destacado-card-time">' + timeAgo(it.d.timestamp) + '</span>';
-      card.addEventListener('click', function() { scrollToMessage(it.d.id); exitSubPanel(el.destacadosModal, false); });
+      card.addEventListener('click', function() { scrollToMessage(it.d.id); exitSubPanel(el.destacadosModal); });
       el.destacadosList.appendChild(card);
     });
   }
 }
-function hideDestacadosModal(backToSettings) { exitSubPanel(el.destacadosModal, backToSettings); }
+function hideDestacadosModal() { exitSubPanel(el.destacadosModal); }
 function scrollToMessage(msgId) {
   var w = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
   if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); w.classList.add('highlight-flash'); setTimeout(function(){ w.classList.remove('highlight-flash'); }, 2000); }
@@ -1843,8 +1852,8 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() { if (el.wishlistInput) el.wishlistInput.focus(); }, 150);
   }
   if (el.wishlistBtn) el.wishlistBtn.addEventListener('click', openWishlistModal);
-  if (el.wishlistCloseBtn) el.wishlistCloseBtn.addEventListener('click', function(){ hideWishlistModal(true); });
-  if (el.wishlistModal) el.wishlistModal.addEventListener('click', function(e) { if (e.target === el.wishlistModal) hideWishlistModal(true); });
+  if (el.wishlistCloseBtn) el.wishlistCloseBtn.addEventListener('click', function(){ hideWishlistModal(); });
+  if (el.wishlistModal) el.wishlistModal.addEventListener('click', function(e) { if (e.target === el.wishlistModal) hideWishlistModal(); });
   if (el.wishlistAddBtn) el.wishlistAddBtn.addEventListener('click', addWishlistItem);
   if (el.wishlistInput) el.wishlistInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); addWishlistItem(); }
@@ -2022,7 +2031,7 @@ function deleteWishlistItem(id) {
     if (ok) db.collection(WISHLIST_COLLECTION).doc(id).delete().catch(function(){ showError('No se pudo eliminar'); });
   });
 }
-function hideWishlistModal(backToSettings) { exitSubPanel(el.wishlistModal, backToSettings); }
+function hideWishlistModal() { exitSubPanel(el.wishlistModal); }
 
 /* ============================================
    ANIVERSARIO
@@ -2120,11 +2129,12 @@ function exportChatPdf() {
    GIFS GIPHY (clave propia guardada localmente)
    ============================================ */
 var GIPHY_KEY_STORAGE = 'chatpareja_giphy_key';
+var GIPHY_DEFAULT_KEY = 'huBnnWBGPtWnH0vpbzXtayTQxYmmQTYE';
 var gifPickerOverlay = null;
 var gifSearchTimer = null;
 
 function getGiphyKey() {
-  try { return localStorage.getItem(GIPHY_KEY_STORAGE) || ''; } catch (e) { return ''; }
+  try { return localStorage.getItem(GIPHY_KEY_STORAGE) || GIPHY_DEFAULT_KEY; } catch (e) { return GIPHY_DEFAULT_KEY; }
 }
 function toggleGifPicker() {
   if (!getGiphyKey()) { showError('Configura tu API key gratuita de GIPHY en Ajustes'); return; }
