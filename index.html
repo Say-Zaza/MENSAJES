@@ -82,6 +82,7 @@
           </div>
           <div class="header-sub-row">
             <span id="user-badge" class="user-badge">Conectando...</span>
+            <button type="button" id="anniversary-chip" class="anniversary-chip hidden" aria-live="polite"></button>
             <span id="pending-indicator" class="pending-indicator hidden" aria-live="polite"></span>
             <div id="typing-indicator" class="typing-indicator hidden" aria-live="polite"></div>
           </div>
@@ -119,6 +120,13 @@
     <div id="search-bar" class="search-bar hidden" role="search">
       <label for="search-input" class="sr-only">Buscar en mensajes</label>
       <input type="search" id="search-input" placeholder="Buscar en mensajes..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <span id="search-count" class="search-count"></span>
+      <button type="button" id="search-prev-btn" class="btn-search-nav" aria-label="Resultado anterior" title="Anterior">
+        <span aria-hidden="true"></span>
+      </button>
+      <button type="button" id="search-next-btn" class="btn-search-nav" aria-label="Resultado siguiente" title="Siguiente">
+        <span aria-hidden="true"></span>
+      </button>
       <button type="button" id="search-close-btn" class="btn-search-close" aria-label="Cerrar búsqueda">
         <span aria-hidden="true"></span>
       </button>
@@ -129,7 +137,7 @@
       <div class="welcome-message" id="welcome-message">
         <div class="welcome-icon" aria-hidden="true"></div>
         <h2>¡Chat Listo!</h2>
-        <p>Tus mensajes se sincronizan en tiempo real y se respaldan localmente. Se purgan de Firebase pasados 5 días.</p>
+        <p>Sus mensajes se sincronizan al instante, solo entre ustedes dos. 💕</p>
       </div>
     </main>
 
@@ -151,6 +159,9 @@
 
       <form id="chat-form" class="chat-form" onsubmit="return false;">
         <div class="input-left-actions">
+          <button type="button" id="gif-btn" class="btn-emoji" aria-label="Enviar GIF" title="GIFs">
+            <span class="btn-gif-inner" aria-hidden="true">GIF</span>
+          </button>
           <button type="button" id="emoji-btn" class="btn-emoji" aria-label="Abrir emojis" aria-expanded="false">
             <span class="btn-emoji-inner" aria-hidden="true"></span>
           </button>
@@ -204,68 +215,6 @@
         <button type="button" class="voice-rec-cancel-btn" id="voice-rec-cancel-btn" aria-label="Cancelar grabación">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Pairing Modal (solo 2 usuarios) -->
-  <div id="pairing-modal" class="pairing-modal hidden" role="dialog" aria-modal="true" aria-label="Emparejamiento de pareja">
-    <div class="pairing-modal-content">
-      <div class="pairing-header">
-        <h2>💕 Emparejamiento</h2>
-      </div>
-      <div class="pairing-body">
-        <!-- Paso 1: Generar código (primer usuario) -->
-        <div id="pairing-step-generate" class="pairing-step">
-          <div class="pairing-icon" aria-hidden="true">🔐</div>
-          <h3>Eres el primero</h3>
-          <p>Genera un código para compartir con tu pareja.</p>
-          <button type="button" id="pairing-generate-btn" class="btn-pairing-primary">
-            <span class="btn-text">Generar código</span>
-          </button>
-        </div>
-
-        <!-- Paso 2: Mostrar código generado -->
-        <div id="pairing-step-show-code" class="pairing-step hidden">
-          <div class="pairing-icon" aria-hidden="true">📱</div>
-          <h3>Tu código de emparejamiento</h3>
-          <p>Compártelo con tu pareja (expira en 10 min)</p>
-          <div class="pairing-code-display" id="pairing-code-display" aria-live="polite"></div>
-          <button type="button" id="pairing-copy-btn" class="btn-pairing-secondary">
-            <span class="btn-text">Copiar código</span>
-          </button>
-          <p class="pairing-hint">Tu pareja debe ir a "Unirse con código" en este mismo chat.</p>
-        </div>
-
-        <!-- Paso 3: Introducir código (segundo usuario) -->
-        <div id="pairing-step-enter" class="pairing-step hidden">
-          <div class="pairing-icon" aria-hidden="true">🔑</div>
-          <h3>Unirse con código</h3>
-          <p>Introduce el código que te dio tu pareja.</p>
-          <input type="text" id="pairing-code-input" class="pairing-code-input" maxlength="6" placeholder="000000" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="numeric" aria-label="Código de emparejamiento de 6 dígitos">
-          <button type="button" id="pairing-submit-btn" class="btn-pairing-primary">
-            <span class="btn-text">Unirse</span>
-          </button>
-          <p class="pairing-error hidden" id="pairing-error" role="alert"></p>
-        </div>
-
-        <!-- Paso 4: Chat completo (3er usuario) -->
-        <div id="pairing-step-full" class="pairing-step hidden">
-          <div class="pairing-icon" aria-hidden="true">🚫</div>
-          <h3>Chat completo</h3>
-          <p>Este chat ya tiene a sus dos usuarios emparejados.</p>
-          <p class="pairing-hint">Solo pueden estar 2 personas en esta conversación privada.</p>
-        </div>
-
-        <!-- Paso 5: Emparejamiento exitoso -->
-        <div id="pairing-step-success" class="pairing-step hidden">
-          <div class="pairing-icon" aria-hidden="true">✅</div>
-          <h3>¡Emparejados!</h3>
-          <p id="pairing-success-text"></p>
-          <button type="button" id="pairing-continue-btn" class="btn-pairing-primary">
-            <span class="btn-text">Entrar al chat</span>
-          </button>
-        </div>
       </div>
     </div>
   </div>
@@ -357,6 +306,56 @@
           </label>
         </div>
 
+        <!-- Pareja: aniversario + bucket list -->
+        <div class="settings-section">
+          <h3>Pareja</h3>
+          <div class="anniversary-row">
+            <div class="anniversary-field">
+              <label class="profile-label" for="anniversary-input">Fecha de aniversario</label>
+              <input type="date" id="anniversary-input" class="profile-input">
+            </div>
+            <button type="button" id="anniversary-save-btn" class="profile-btn primary">Guardar</button>
+          </div>
+          <p class="settings-desc">Les avisaremos en el chat cuando se acerque. 💕</p>
+          <button type="button" id="wishlist-btn" class="settings-action-row">
+            <span class="settings-action-icon" aria-hidden="true">✨</span>
+            <span class="settings-action-label">Bucket list compartida</span>
+            <span id="wishlist-count" class="settings-action-count"></span>
+          </button>
+        </div>
+
+        <!-- Privacidad: E2EE -->
+        <div class="settings-section">
+          <h3>Privacidad — Cifrado extremo a extremo</h3>
+          <p class="settings-desc">Elijan UNA frase secreta IGUAL los dos (mínimo 6 caracteres). Sus mensajes se cifrarán en el dispositivo y solo podrán leerse con esa frase. No se envía a ningún servidor.</p>
+          <div class="e2ee-row">
+            <input type="password" id="e2ee-pass-input" class="profile-input" placeholder="Frase secreta compartida" maxlength="128" autocomplete="off">
+            <button type="button" id="e2ee-save-btn" class="profile-btn primary">Activar</button>
+          </div>
+          <div id="e2ee-status" class="e2ee-status"></div>
+          <button type="button" id="e2ee-disable-btn" class="profile-btn ghost e2ee-disable hidden">Desactivar en este dispositivo</button>
+        </div>
+
+        <!-- Exportar chat -->
+        <div class="settings-section">
+          <h3>Exportar chat</h3>
+          <p class="settings-desc">Descarga la conversación completa o ábrela lista para imprimir/guardar como PDF.</p>
+          <div class="export-row">
+            <button type="button" id="export-txt-btn" class="profile-btn primary">Descargar .TXT</button>
+            <button type="button" id="export-pdf-btn" class="profile-btn ghost">Imprimir / PDF</button>
+          </div>
+        </div>
+
+        <!-- GIFs GIPHY -->
+        <div class="settings-section">
+          <h3>GIFs (GIPHY)</h3>
+          <p class="settings-desc">Pegá tu API key gratuita de GIPHY (developers.giphy.com → Create an App). Se guarda solo en este dispositivo.</p>
+          <div class="e2ee-row">
+            <input type="text" id="giphy-key-input" class="profile-input" placeholder="API key de GIPHY" maxlength="80" autocomplete="off">
+            <button type="button" id="giphy-save-btn" class="profile-btn primary">Guardar</button>
+          </div>
+        </div>
+
         <!-- Stats -->
         <div class="settings-section">
           <h3>Estadísticas</h3>
@@ -420,6 +419,23 @@
         </button>
       </div>
       <div id="destacados-list" class="destacados-list"></div>
+    </div>
+  </div>
+
+  <!-- Wishlist / Bucket List Modal -->
+  <div id="wishlist-modal" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Bucket list compartida">
+    <div class="destacados-modal-content">
+      <div class="destacados-header">
+        <h3 class="destacados-title">Bucket list 💕</h3>
+        <button type="button" id="wishlist-close-btn" class="btn-icon" aria-label="Cerrar bucket list">
+          <span aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="wishlist-add-row">
+        <input type="text" id="wishlist-input" class="wishlist-input" placeholder="¿Qué quieren hacer juntos?" maxlength="200" autocomplete="off">
+        <button type="button" id="wishlist-add-btn" class="profile-btn primary">Agregar</button>
+      </div>
+      <div id="wishlist-list" class="wishlist-list"></div>
     </div>
   </div>
 

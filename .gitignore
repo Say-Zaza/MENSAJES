@@ -3,6 +3,8 @@ node_modules/
 .DS_Store
 *.tmp
 sync-config.json
+accounts.json
+serviceAccountKey.json
 media/
 
 database.json

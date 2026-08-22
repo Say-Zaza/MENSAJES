@@ -212,7 +212,6 @@ input, textarea { font-family: inherit; }
   animation: pulse 1.5s ease-in-out infinite;
 }
 .pending-indicator.hidden { display: none; }
-}
 @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.6;} }
 
 .typing-indicator {
@@ -223,7 +222,6 @@ input, textarea { font-family: inherit; }
   animation: slideIn var(--transition-base);
 }
 .typing-indicator.hidden { display: none; }
-}
 .typing-dots { display: inline-flex; gap: 2px; }
 .typing-dots span {
   width: 4px; height: 4px; background: currentColor; border-radius: 50%;
@@ -333,6 +331,15 @@ input, textarea { font-family: inherit; }
 }
 .btn-search-close:hover { background: var(--border-color); }
 .btn-search-close svg { width: 16px; height: 16px; }
+.btn-search-nav {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--color-text-muted);
+  padding: 6px; border-radius: 50%;
+  transition: background var(--transition-fast);
+  width: 32px; height: 32px; flex-shrink: 0;
+  font-size: 0.8rem; font-weight: 700;
+}
+.btn-search-nav:hover { background: var(--border-color); }
 .search-count {
   font-size: 0.75rem;
   color: var(--color-text-muted);
@@ -420,7 +427,6 @@ body.dark-mode .chat-messages {
 .scroll-icon svg { width: 16px; height: 16px; }
 .scroll-count {
   padding-right: 8px;
-}
   min-width: 20px;
   text-align: center;
 }
@@ -716,6 +722,13 @@ body.dark-mode .message-wrapper.self .voice-time {
   }
 }
 
+.audio-duration {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ============================================
    REPLY DENTRO DE BURBUJA
    ============================================ */
@@ -871,7 +884,6 @@ body.dark-mode .message-wrapper.self .reply-text { color: rgba(255,255,255,.85);
 @media (hover: hover) and (pointer: fine) {
   .message-wrapper:hover .swipe-reply-btn { transform: translateY(-50%) scale(1); opacity: 1; }
 }
-@media (max-width: 767px) { .swipe-reply-btn { display: none; } }
 
 /* ============================================
    CONTEXT MENU
@@ -970,6 +982,15 @@ body.dark-mode .message-wrapper.self .reply-text { color: rgba(255,255,255,.85);
   border-radius: var(--radius-m);
 }
 @keyframes skeleton-pulse { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.skeleton-msg {
+  width: 62%; height: 42px; margin-top: 6px;
+  align-self: flex-start;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.skeleton-msg.self { align-self: flex-end; }
+.skeleton-msg .skeleton-loader { height: 100%; border-radius: inherit; }
 
 /* ============================================
    ÁREA DE ENTRADA
@@ -1566,71 +1587,15 @@ body.dark-mode .message-wrapper.self .reply-text { color: rgba(255,255,255,.85);
 .btn-edit-save:hover { background: var(--primary-hover); }
 
 /* ============================================
-   PAIRING MODAL (solo 2 usuarios)
+   BOTONES DE LOGIN (ex btn-pairing)
    ============================================ */
-.pairing-modal {
-  position: fixed; inset: 0; z-index: 400;
-  background: rgba(0,0,0,.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-  display: flex; align-items: center; justify-content: center;
-  padding: 20px;
-  animation: fadeIn var(--transition-base);
-}
-.pairing-modal.hidden { display: none; }
-
-.pairing-modal-content {
-  background: white; border-radius: var(--radius-xl); padding: 32px 24px;
-  width: 100%; max-width: 360px; box-shadow: var(--shadow-xl);
-  animation: popIn var(--transition-slow);
-  text-align: center;
-}
-
-.pairing-header h2 { font-size: 1.25rem; font-weight: 700; margin-bottom: 8px; }
-.pairing-header { margin-bottom: 24px; }
-
-.pairing-body { display: flex; flex-direction: column; gap: 20px; }
-
-.pairing-step { display: flex; flex-direction: column; align-items: center; gap: 16px; }
-.pairing-step.hidden { display: none; }
-
-.pairing-icon { font-size: 3.5rem; line-height: 1; }
-.pairing-step h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; }
-.pairing-step p { color: var(--color-text-muted); font-size: 0.9rem; line-height: 1.5; }
-
-.pairing-code-display {
-  background: var(--bg-card-hover); border: 2px dashed var(--primary-accent);
-  border-radius: var(--radius-m); padding: 20px; font-size: 2.5rem;
-  font-weight: 800; letter-spacing: 0.5em; color: var(--primary-accent);
-  font-family: 'Courier New', monospace; user-select: all; word-break: break-all;
-}
-
-.pairing-code-input {
-  width: 100%; max-width: 200px; text-align: center; letter-spacing: 0.5em;
-  font-size: 1.75rem; font-weight: 700; padding: 16px;
-  border: 2px solid var(--border-color); border-radius: var(--radius-m);
-  outline: none; transition: border var(--transition-fast);
-}
-.pairing-code-input:focus { border-color: var(--primary-accent); box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
-
-.pairing-error { color: var(--danger-color); font-size: 0.85rem; min-height: 20px; }
-.pairing-hint { font-size: 0.75rem; color: var(--color-text-muted); }
-
-.btn-pairing-primary, .btn-pairing-secondary {
+.btn-pairing-primary {
   width: 100%; max-width: 280px; padding: 14px 24px; border-radius: var(--radius-m);
   font-size: 1rem; font-weight: 600; min-height: 48px;
   transition: all var(--transition-fast);
 }
 .btn-pairing-primary { background: var(--primary-accent); color: white; }
 .btn-pairing-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
-.btn-pairing-secondary { background: var(--border-color); color: var(--color-text-main); }
-.btn-pairing-secondary:hover { background: #d1d5db; }
-
-/* Dark mode para pairing modal */
-body.dark-mode .pairing-modal-content { background: var(--bg-card); }
-body.dark-mode .pairing-code-display { background: #1f2c34; }
-body.dark-mode .pairing-code-input { background: var(--bg-card); border-color: var(--border-color); color: var(--color-text-main); }
-body.dark-mode .pairing-code-input:focus { border-color: var(--primary-accent); }
-body.dark-mode .btn-pairing-secondary { background: #2a3a42; color: var(--color-text-main); }
-body.dark-mode .btn-pairing-secondary:hover { background: #3a4a52; }
 
 /* ============================================
    ANIMATIONS
@@ -2052,6 +2017,83 @@ body.dark-mode .search-bar input:focus {
 .partner-profile-avatar svg { width: 36px; height: 36px; }
 
 /* ============================================
+   ANIVERSARIO / E2EE / EXPORT / WISHLIST / GIF
+   ============================================ */
+.anniversary-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px;
+  background: linear-gradient(135deg, #fce7f3, #fbcfe8);
+  color: #9d174d;
+  border-radius: 12px; font-size: 0.65rem; font-weight: 700;
+  border: 1px solid rgba(236,72,153,0.25);
+  white-space: nowrap; flex-shrink: 0;
+}
+.anniversary-chip.hidden { display: none; }
+body.dark-mode .anniversary-chip { background: rgba(236,72,153,0.15); color: #f9a8d4; border-color: rgba(236,72,153,0.35); }
+
+.anniversary-row, .e2ee-row, .export-row {
+  display: flex; gap: 8px; align-items: flex-end;
+  flex-wrap: wrap;
+}
+.anniversary-field { flex: 1; min-width: 180px; }
+.e2ee-status {
+  margin-top: 10px; font-size: 0.78rem; line-height: 1.5;
+  color: var(--color-text-muted);
+}
+.e2ee-status .e2ee-on { color: var(--success-color); font-weight: 700; }
+.e2ee-status .e2ee-off { color: var(--warning-color); font-weight: 600; }
+.e2ee-status .e2ee-hint { opacity: 0.75; }
+.e2ee-disable { margin-top: 10px; }
+.e2ee-disable.hidden { display: none; }
+
+.btn-gif-inner {
+  font-size: 0.62rem; font-weight: 800; letter-spacing: 0.5px;
+  background: var(--border-color); color: var(--color-text-muted);
+  border-radius: 6px; padding: 4px 5px; line-height: 1;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.btn-emoji:hover .btn-gif-inner { background: var(--primary-accent); color: white; }
+
+.wishlist-add-row { display: flex; gap: 8px; padding: 12px 18px 0; }
+.wishlist-input {
+  flex: 1; padding: 10px 14px;
+  border: 1.5px solid var(--border-color); border-radius: var(--radius-m);
+  font-size: 0.9rem; color: var(--color-text-main);
+  background: #f9fafb; outline: none;
+}
+.wishlist-input:focus { border-color: var(--primary-accent); }
+.wishlist-list {
+  flex: 1; overflow-y: auto; padding: 12px 18px calc(18px + var(--safe-b));
+  display: flex; flex-direction: column; gap: 8px;
+}
+.wishlist-item {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: var(--radius-m); padding: 10px 12px;
+  animation: fadeIn var(--transition-base);
+}
+.wishlist-check {
+  width: 22px; height: 22px; flex-shrink: 0;
+  accent-color: var(--primary-accent);
+  cursor: pointer;
+}
+.wishlist-text {
+  flex: 1; font-size: 0.88rem; line-height: 1.35;
+  word-break: break-word;
+}
+.wishlist-item.done .wishlist-text { text-decoration: line-through; opacity: 0.55; }
+.wishlist-meta { font-size: 0.62rem; color: var(--color-text-muted); white-space: nowrap; }
+.wishlist-del {
+  width: 26px; height: 26px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; color: var(--color-text-muted);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.wishlist-del:hover { background: #fee2e2; color: var(--danger-color); }
+body.dark-mode .wishlist-input { background: var(--bg-card-hover); color: var(--color-text-main); }
+body.dark-mode .wishlist-item { background: var(--bg-card-hover); }
+
+/* ============================================
    PRINT STYLES
    ============================================ */
 @media print {
@@ -2059,7 +2101,6 @@ body.dark-mode .search-bar input:focus {
   .chat-input-area,
   .settings-modal,
   .edit-modal,
-  .pairing-modal,
   .custom-confirm,
   .custom-context-menu,
   .emoji-picker,
