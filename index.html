@@ -89,6 +89,10 @@
         </div>
       </div>
       <div class="header-actions">
+        <button type="button" id="more-btn" class="btn-icon" aria-label="Más funciones" title="Más">
+          <span class="btn-icon-inner" aria-hidden="true"></span>
+          <span id="more-badge" class="more-badge hidden"></span>
+        </button>
         <button type="button" id="pinned-btn" class="btn-icon hidden" aria-label="Ver mensaje fijado" title="Mensaje fijado" aria-expanded="false">
           <span class="btn-icon-inner" aria-hidden="true"></span>
         </button>
@@ -299,30 +303,9 @@
           </div>
         </div>
 
-        <!-- Destacados -->
+        <!-- Aniversario -->
         <div class="settings-section">
-          <h3>Destacados</h3>
-          <p class="settings-desc">Guarda tus mensajes favoritos y míralos aquí. También puedes ver los de tu pareja si ella comparte los suyos.</p>
-          <button type="button" id="my-destacados-btn" class="settings-action-row">
-            <span class="settings-action-icon" aria-hidden="true"></span>
-            <span class="settings-action-label">Mis destacados</span>
-            <span id="destacados-count" class="settings-action-count"></span>
-          </button>
-          <button type="button" id="partner-destacados-btn" class="settings-action-row">
-            <span class="settings-action-icon" aria-hidden="true"></span>
-            <span class="settings-action-label">Destacados de mi pareja</span>
-            <span id="partner-destacados-status" class="settings-action-status"></span>
-          </button>
-          <label class="settings-toggle-row">
-            <span class="settings-toggle-label">Compartir mis destacados con mi pareja</span>
-            <input type="checkbox" id="share-destacados-toggle" class="settings-toggle-input">
-            <span class="settings-toggle-switch" aria-hidden="true"></span>
-          </label>
-        </div>
-
-        <!-- Pareja: aniversario + bucket list -->
-        <div class="settings-section">
-          <h3>Pareja</h3>
+          <h3>Aniversario 💕</h3>
           <div class="anniversary-row">
             <div class="anniversary-field">
               <label class="profile-label" for="anniversary-input">Fecha de aniversario</label>
@@ -331,11 +314,6 @@
             <button type="button" id="anniversary-save-btn" class="profile-btn primary">Guardar</button>
           </div>
           <p class="settings-desc">Les avisaremos en el chat cuando se acerque. 💕</p>
-          <button type="button" id="wishlist-btn" class="settings-action-row">
-            <span class="settings-action-icon" aria-hidden="true">✨</span>
-            <span class="settings-action-label">Bucket list compartida</span>
-            <span id="wishlist-count" class="settings-action-count"></span>
-          </button>
         </div>
 
         <!-- Privacidad: E2EE -->
@@ -413,6 +391,126 @@
     </div>
   </div>
 
+  <!-- More Hub (Más funciones) -->
+  <div id="more-modal" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Más funciones">
+    <div class="destacados-modal-content more-content">
+      <div class="destacados-header">
+        <h3 class="destacados-title">Más 💕</h3>
+        <button type="button" id="more-close-btn" class="btn-icon" aria-label="Cerrar">
+          <span aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="more-grid">
+        <button type="button" id="cartas-row" class="more-row">
+          <span class="more-row-icon">💌</span>
+          <span class="more-row-text">
+            <span class="more-row-label">Buzón de cartas</span>
+            <span class="more-row-sub">Deja una carta para tu amor</span>
+          </span>
+          <span id="cartas-unread-badge" class="more-row-badge hidden"></span>
+        </button>
+        <button type="button" id="my-destacados-btn" class="more-row">
+          <span class="more-row-icon">⭐</span>
+          <span class="more-row-text">
+            <span class="more-row-label">Mis destacados</span>
+            <span class="more-row-sub">Mensajes que guardaste</span>
+          </span>
+          <span id="destacados-count" class="more-row-badge soft"></span>
+        </button>
+        <button type="button" id="partner-destacados-btn" class="more-row">
+          <span class="more-row-icon">💞</span>
+          <span class="more-row-text">
+            <span class="more-row-label">Destacados de mi pareja</span>
+            <span id="partner-destacados-status" class="more-row-sub"></span>
+          </span>
+        </button>
+        <button type="button" id="wishlist-btn" class="more-row">
+          <span class="more-row-icon">✨</span>
+          <span class="more-row-text">
+            <span class="more-row-label">Bucket list compartida</span>
+            <span class="more-row-sub">Sueños juntos por cumplir</span>
+          </span>
+          <span id="wishlist-count" class="more-row-badge soft"></span>
+        </button>
+      </div>
+      <label class="settings-toggle-row more-share-row">
+        <span class="settings-toggle-label">Compartir mis destacados con mi pareja</span>
+        <input type="checkbox" id="share-destacados-toggle" class="settings-toggle-input">
+        <span class="settings-toggle-switch" aria-hidden="true"></span>
+      </label>
+    </div>
+  </div>
+
+  <!-- Buzón de Cartas -->
+  <div id="cartas-modal" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Buzón de cartas">
+    <div class="destacados-modal-content cartas-content">
+      <div class="destacados-header">
+        <h3 class="destacados-title">💌 Buzón de cartas</h3>
+        <button type="button" id="cartas-close-btn" class="btn-icon" aria-label="Cerrar buzón">
+          <span aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="cartas-tabs" role="tablist">
+        <button type="button" id="cartas-tab-in" class="cartas-tab active" role="tab">Recibidas <span id="cartas-in-badge" class="tab-badge hidden"></span></button>
+        <button type="button" id="cartas-tab-out" class="cartas-tab" role="tab">Enviadas</button>
+      </div>
+      <div class="cartas-compose-wrap">
+        <button type="button" id="cartas-new-btn" class="profile-btn primary cartas-new-btn">✍️ Escribir carta</button>
+        <div id="cartas-compose" class="cartas-compose hidden">
+          <div class="w-full bg-surface-container-lowest rounded-xl burgundy-shadow p-6 md:p-10 relative overflow-hidden flex flex-col min-h-[442px]">
+            <input class="w-full font-headline-md text-headline-md text-primary bg-transparent border-none p-0 mb-6 placeholder-primary/40 focus:ring-0" placeholder="Dearest," type="text"/>
+            <textarea class="w-full flex-grow font-body-lg text-body-lg text-on-surface leading-relaxed placeholder-on-surface/30 border-none p-0 focus:ring-0" placeholder="Pen your thoughts..." rows="5" maxlength="4000" autocomplete="off"></textarea>
+            <div class="mt-8 flex gap-4 overflow-x-auto hidden">
+              <div class="w-24 h-24 rounded-lg bg-surface-container overflow-hidden border border-outline-variant flex-shrink-0 relative">
+                <img class="w-full h-full object-cover grayscale opacity-80 mix-blend-multiply" data-alt="A soft focus, faded polaroid style photo of hands clasped together, warm light, vintage film aesthetic, high-end fine art photography style, subtle noise grain, delicate lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDjNx5jix6hVqR6AJbwz1mFrabix-rzzKKsdsJN_nxSKhkLeWgqcLLnwEsyYgd3goMi52XI0DXn9r2yOvAlG-n6QOSJwCPFHVuU2FLAnmDIm05u5PO2zamGS79VJjw6NUbXZLUTziU2ZzO0qI3IzTN_5TY9yeaFMfLcShgh9NF8sqGZ43nDkLRcXXM9LLDcnLutK1fpC4W1CJXkvB04snDZJ8SuQO7JP0UdnV0y-modoi4VI1BgD2MNYA"/>
+                <button class="absolute top-1 right-1 bg-surface-container-lowest/80 rounded-full p-1 text-on-surface w-6 h-6 flex items-center justify-center">
+                  <span class="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+            </div>
+            <div class="mt-8 pt-4 border-t-[0.5px] border-tertiary-container/30 flex items-center justify-between">
+              <button class="flex items-center gap-2 text-secondary hover:text-primary transition-colors group">
+                <span class="material-symbols-outlined group-hover:scale-110 transition-transform">add_photo_alternate</span>
+                <span class="font-label-sm text-label-sm">Add Memento</span>
+              </button>
+              <div class="flex items-center gap-3">
+                <span class="font-label-sm text-label-sm text-on-surface-variant">Seal:</span>
+                <button class="w-8 h-8 rounded-full bg-primary flex items-center justify-center shadow-md active:scale-90 transition-transform">
+                  <span class="material-symbols-outlined text-on-primary text-[16px]" style="font-variation-settings: 'FILL' 1;">favorite</span>
+                </button>
+                <button class="w-8 h-8 rounded-full border border-tertiary-container bg-surface flex items-center justify-center text-tertiary hover:bg-surface-variant transition-colors">
+                  <span class="material-symbols-outlined text-[16px]">ac_unit</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <span id="carta-counter" class="carta-counter">0/4000</span>
+          <button type="button" id="carta-cancel-btn" class="profile-btn ghost">Cancelar</button>
+          <button type="button" id="carta-send-btn" class="profile-btn primary">Enviar 💌</button>
+        </div>
+      </div>
+      <div id="cartas-list" class="cartas-list"></div>
+    </div>
+  </div>
+
+  <!-- Lector de carta -->
+  <div id="carta-reader" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Leer carta">
+    <div class="destacados-modal-content carta-reader-content">
+      <div class="carta-paper">
+        <div class="carta-paper-head">
+          <span id="carta-read-from" class="carta-read-from"></span>
+          <span id="carta-read-date" class="carta-read-date"></span>
+        </div>
+        <p id="carta-read-text" class="carta-read-text"></p>
+        <div class="carta-signature">— 💕 —</div>
+      </div>
+      <div class="carta-reader-actions">
+        <button type="button" id="carta-delete-btn" class="profile-btn ghost danger hidden">Eliminar</button>
+        <button type="button" id="carta-close-btn" class="profile-btn primary">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Destacados Modal -->
   <div id="destacados-modal" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Destacados">
     <div class="destacados-modal-content">
@@ -482,7 +580,7 @@
   <!-- Image Lightbox (created dynamically in JS) -->
 
   <!-- Socket.io se carga dinámicamente solo si se detecta el servidor local -->
-  <script src="app.js?v=20260821b"></script>
+  <script src="app.js?v=20260822a"></script>
 
   <script>
     if ('serviceWorker' in navigator) {
