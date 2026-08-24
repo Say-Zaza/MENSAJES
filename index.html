@@ -613,6 +613,21 @@
           </span>
           <span id="wishlist-count" class="more-row-badge soft"></span>
         </button>
+        <button type="button" id="calendar-row" class="more-row">
+          <span class="more-row-icon">📅</span>
+          <span class="more-row-text">
+            <span class="more-row-label">Calendario compartido</span>
+            <span class="more-row-sub">Eventos importantes juntos</span>
+          </span>
+          <span id="calendar-count" class="more-row-badge soft"></span>
+        </button>
+        <button type="button" id="detailed-stats-btn" class="more-row">
+          <span class="more-row-icon">📊</span>
+          <span class="more-row-text">
+            <span class="more-row-label">Estadísticas detalladas</span>
+            <span class="more-row-sub">Gráficos de actividad</span>
+          </span>
+        </button>
       </div>
       <label class="settings-toggle-row more-share-row">
         <span class="settings-toggle-label">Compartir mis destacados con mi pareja</span>
@@ -843,6 +858,92 @@
   </div>
 
   <!-- Image Lightbox (created dynamically in JS) -->
+
+  <!-- Calendario Compartido -->
+  <div id="calendar-modal" class="cartas-overlay hidden" role="dialog" aria-modal="true" aria-label="Calendario compartido">
+    <div class="cartas-vintage-container" style="max-height:85dvh;">
+      <div class="cartas-vintage-header">
+        <span class="material-symbols-outlined cartas-header-icon" style="font-variation-settings:'FILL' 1;">calendar_month</span>
+        <h1 class="cartas-vintage-title">Calendario</h1>
+        <button type="button" id="calendar-close-btn" class="cartas-close-btn" aria-label="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="calendar-nav">
+        <button type="button" id="calendar-prev-btn" class="calendar-nav-btn"><span class="material-symbols-outlined">chevron_left</span></button>
+        <span id="calendar-month-label" class="calendar-month-label"></span>
+        <button type="button" id="calendar-next-btn" class="calendar-nav-btn"><span class="material-symbols-outlined">chevron_right</span></button>
+      </div>
+      <div class="calendar-weekdays">
+        <span>Lu</span><span>Ma</span><span>Mi</span><span>Ju</span><span>Vi</span><span>Sa</span><span>Do</span>
+      </div>
+      <div id="calendar-grid" class="calendar-grid"></div>
+      <div id="calendar-events-list" class="calendar-events-list"></div>
+      <button type="button" id="calendar-add-btn" class="cartas-new-btn" style="margin:12px 20px;">
+        <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">add</span> Nuevo evento
+      </button>
+    </div>
+  </div>
+
+  <!-- Add Event Modal -->
+  <div id="event-modal" class="cartas-overlay hidden" role="dialog" aria-modal="true" aria-label="Agregar evento">
+    <div class="event-modal-content">
+      <h3 class="event-modal-title">Nuevo evento</h3>
+      <input type="text" id="event-title-input" class="event-input" placeholder="Nombre del evento" maxlength="60" autocomplete="off"/>
+      <input type="date" id="event-date-input" class="event-input"/>
+      <select id="event-type-select" class="event-input">
+        <option value="anniversary">💕 Aniversario</option>
+        <option value="birthday">🎂 Cumpleaños</option>
+        <option value="date">🌹 Cita especial</option>
+        <option value="trip">✈️ Viaje</option>
+        <option value="goal">🎯 Meta juntos</option>
+        <option value="other">📌 Otro</option>
+      </select>
+      <label class="event-repeat-row">
+        <input type="checkbox" id="event-repeat-check"/>
+        <span>Se repite cada año</span>
+      </label>
+      <div class="event-modal-actions">
+        <button type="button" id="event-cancel-btn" class="carta-compose-btn cancel">Cancelar</button>
+        <button type="button" id="event-save-btn" class="carta-compose-btn send">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Estadísticas Detalladas -->
+  <div id="detailed-stats-modal" class="cartas-overlay hidden" role="dialog" aria-modal="true" aria-label="Estadísticas detalladas">
+    <div class="cartas-vintage-container" style="max-height:88dvh;">
+      <div class="cartas-vintage-header">
+        <span class="material-symbols-outlined cartas-header-icon" style="font-variation-settings:'FILL' 1;">bar_chart</span>
+        <h1 class="cartas-vintage-title">Estadísticas</h1>
+        <button type="button" id="stats-close-btn" class="cartas-close-btn" aria-label="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="stats-scroll">
+        <div class="stats-summary-row">
+          <div class="stats-summary-card"><span class="stats-summary-num" id="ds-total">0</span><span class="stats-summary-label">Mensajes totales</span></div>
+          <div class="stats-summary-card"><span class="stats-summary-num" id="ds-days">0</span><span class="stats-summary-label">Días hablando</span></div>
+        </div>
+        <div class="stats-section">
+          <h3 class="stats-section-title">Mensajes por día (últimos 14 días)</h3>
+          <canvas id="chart-daily" class="stats-chart" width="400" height="180"></canvas>
+        </div>
+        <div class="stats-section">
+          <h3 class="stats-section-title">Actividad por hora</h3>
+          <canvas id="chart-hourly" class="stats-chart" width="400" height="160"></canvas>
+        </div>
+        <div class="stats-section">
+          <h3 class="stats-section-title">Quién escribe más</h3>
+          <canvas id="chart-pie" class="stats-chart" width="400" height="200"></canvas>
+        </div>
+        <div class="stats-section">
+          <h3 class="stats-section-title">Top días más activos</h3>
+          <div id="stats-top-days" class="stats-top-days"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Socket.io se carga dinámicamente solo si se detecta el servidor local -->
   <script src="app.js?v=20260822a"></script>

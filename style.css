@@ -3166,6 +3166,164 @@ body.dark-mode .wishlist-input { background: var(--bg-card-hover); color: var(--
 body.dark-mode .wishlist-item { background: var(--bg-card-hover); }
 
 /* ============================================
+   CALENDAR
+   ============================================ */
+.calendar-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 20px;
+}
+.calendar-nav-btn {
+  width: 36px; height: 36px; border-radius: 50%; border: none;
+  background: var(--bg-card-hover, #ebe8e2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-main, #1c1c18);
+  transition: background var(--transition-fast);
+}
+.calendar-nav-btn:hover { background: #d1cdc6; }
+.calendar-month-label {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 20px; font-weight: 600; color: #6c0028;
+}
+.calendar-weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  padding: 0 16px; gap: 2px;
+}
+.calendar-weekdays span {
+  text-align: center; font-size: 11px; font-weight: 600;
+  color: var(--color-text-muted, #8a7174);
+  padding: 6px 0; text-transform: uppercase;
+}
+.calendar-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  padding: 0 16px; gap: 2px;
+}
+.calendar-day {
+  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  border-radius: 10px; font-size: 14px; font-family: 'Manrope', sans-serif;
+  cursor: pointer; position: relative;
+  color: var(--color-text-main, #1c1c18);
+  transition: background var(--transition-fast);
+}
+.calendar-day:hover { background: var(--bg-card-hover, #ebe8e2); }
+.calendar-day.today { background: #6c0028; color: #fff; font-weight: 700; }
+.calendar-day.has-event::after {
+  content: ''; position: absolute; bottom: 4px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #f59e0b;
+}
+.calendar-day.other-month { opacity: 0.3; }
+.calendar-events-list {
+  padding: 8px 20px; max-height: 180px; overflow-y: auto;
+}
+.calendar-event-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--bg-card-hover, #ebe8e2);
+  margin-bottom: 6px; cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.calendar-event-item:hover { background: #d1cdc6; }
+.calendar-event-icon { font-size: 1.2rem; }
+.calendar-event-info { flex: 1; min-width: 0; }
+.calendar-event-name { font-weight: 600; font-size: 13px; color: var(--color-text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calendar-event-date { font-size: 11px; color: var(--color-text-muted); }
+.calendar-event-del {
+  width: 26px; height: 26px; border-radius: 50%; border: none;
+  background: none; cursor: pointer; color: var(--color-text-muted);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; transition: all var(--transition-fast);
+}
+.calendar-event-del:hover { background: #fee2e2; color: #ef4444; }
+body.dark-mode .calendar-nav-btn { background: var(--bg-card-hover); color: var(--color-text-main); }
+body.dark-mode .calendar-nav-btn:hover { background: var(--bg-card); }
+body.dark-mode .calendar-day:hover { background: var(--bg-card-hover); }
+body.dark-mode .calendar-day.today { background: #8d1b3d; }
+body.dark-mode .calendar-event-item { background: var(--bg-card-hover); }
+body.dark-mode .calendar-event-item:hover { background: var(--bg-card); }
+
+/* Event Modal */
+.event-modal-content {
+  background: var(--bg-card, #fdf9f3);
+  width: min(380px, 90%); border-radius: 16px;
+  padding: 24px 20px;
+}
+.event-modal-title {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 20px; color: #6c0028; margin: 0 0 16px;
+}
+.event-input {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--border-color, #e6e2dc);
+  border-radius: 10px; font-family: 'Manrope', sans-serif;
+  font-size: 14px; background: var(--bg-card, #fff);
+  color: var(--color-text-main, #1c1c18);
+  margin-bottom: 10px; outline: none;
+  box-sizing: border-box;
+}
+.event-input:focus { border-color: #6c0028; }
+.event-repeat-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--color-text-main);
+  margin-bottom: 14px; cursor: pointer;
+}
+.event-repeat-row input { accent-color: #6c0028; }
+.event-modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+body.dark-mode .event-modal-content { background: var(--bg-card); }
+body.dark-mode .event-input { background: var(--bg-card-hover); border-color: var(--border-color); color: var(--color-text-main); }
+
+/* ============================================
+   DETAILED STATISTICS
+   ============================================ */
+.stats-scroll {
+  flex: 1; overflow-y: auto; padding: 12px 20px calc(16px + var(--safe-b, 0px));
+}
+.stats-summary-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 16px;
+}
+.stats-summary-card {
+  text-align: center; padding: 14px 8px;
+  background: var(--bg-card-hover, #ebe8e2); border-radius: 12px;
+}
+.stats-summary-num {
+  display: block; font-family: 'EB Garamond', Georgia, serif;
+  font-size: 28px; font-weight: 700; color: #6c0028;
+}
+.stats-summary-label {
+  display: block; font-size: 11px; color: var(--color-text-muted);
+  margin-top: 2px; font-family: 'Manrope', sans-serif;
+}
+.stats-section {
+  margin-bottom: 18px;
+}
+.stats-section-title {
+  font-family: 'Manrope', sans-serif;
+  font-size: 13px; font-weight: 600;
+  color: var(--color-text-main, #1c1c18);
+  margin: 0 0 8px;
+}
+.stats-chart {
+  width: 100%; height: auto; border-radius: 10px;
+  background: var(--bg-card-hover, #f5f3ef);
+}
+.stats-top-days { display: flex; flex-direction: column; gap: 6px; }
+.stats-top-day {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--bg-card-hover, #ebe8e2);
+  font-size: 13px;
+}
+.stats-top-day-name { flex: 1; font-weight: 500; color: var(--color-text-main); }
+.stats-top-day-bar {
+  height: 6px; border-radius: 3px; background: #6c0028;
+  transition: width 0.4s ease;
+}
+.stats-top-day-count { font-weight: 700; color: #6c0028; min-width: 24px; text-align: right; }
+body.dark-mode .stats-summary-card { background: var(--bg-card-hover); }
+body.dark-mode .stats-summary-num { color: #ffb2be; }
+body.dark-mode .stats-chart { background: var(--bg-card-hover); }
+body.dark-mode .stats-top-day { background: var(--bg-card-hover); }
+
+/* ============================================
    PRINT STYLES
    ============================================ */
 @media print {

@@ -60,6 +60,10 @@ var partnerPresenceUnsubscribe = null;
 var pendingImageFiles = [];
 var pendingViewOnce = false;
 var pendingImagePreviews = [];
+var CALENDAR_COLLECTION = 'rooms/' + ROOM_ID + '/calendar';
+var calendarEvents = [];
+var calendarMonth = new Date().getMonth();
+var calendarYear = new Date().getFullYear();
 var state = {
   mediaRecorder: null, audioChunks: [], recordingTimer: null,
   recordingSeconds: 0, voiceCancelled: false, isTyping: false, socket: null
@@ -661,6 +665,7 @@ function initializeUser() {
   startPartnerShareSettingListener();
   startWishlistListener();
   startCartasListener();
+  startCalendarListener();
   initE2ee();
   if (isOnline) { flushOfflineQueue(); flushCartasOfflineQueue(); }
 }
@@ -2338,6 +2343,326 @@ function openMoreModal() {
 function closeMoreModal() {
   if (el.moreModal) el.moreModal.style.display = 'none';
 }
+
+/* ===== CALENDAR ===== */
+var EVENT_ICONS = { anniversary: '💕', birthday: '🎂', date: '🌹', trip: '✈️', goal: '🎯', other: '📌' };
+var MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+function startCalendarListener() {
+  if (!currentUser) return;
+  db.collection(CALENDAR_COLLECTION).onSnapshot(function(snap) {
+    calendarEvents = [];
+    snap.forEach(function(doc) { calendarEvents.push(Object.assign({}, doc.data(), { id: doc.id })); });
+    calendarEvents.sort(function(a, b) { return (a.date || '').localeCompare(b.date || ''); });
+    if (el.calendarCount) el.calendarCount.textContent = calendarEvents.length || '';
+    if (el.calendarModal && el.calendarModal.style.display === 'flex') renderCalendar();
+  }, function(err) { console.error('Calendar listener:', err); });
+}
+
+function openCalendarModal() {
+  if (el.calendarModal) el.calendarModal.style.display = 'flex';
+  renderCalendar();
+}
+function closeCalendarModal() {
+  if (el.calendarModal) el.calendarModal.style.display = 'none';
+}
+
+function renderCalendar() {
+  if (!el.calendarGrid || !el.calendarMonthLabel) return;
+  el.calendarMonthLabel.textContent = MONTH_NAMES[calendarMonth] + ' ' + calendarYear;
+  var firstDay = new Date(calendarYear, calendarMonth, 1);
+  var lastDay = new Date(calendarYear, calendarMonth + 1, 0);
+  var startDay = (firstDay.getDay() + 6) % 7;
+  var daysInMonth = lastDay.getDate();
+  var today = new Date();
+  var eventDates = {};
+  calendarEvents.forEach(function(ev) {
+    var d = ev.date;
+    if (d) eventDates[d] = ev;
+  });
+  var html = '';
+  var prevMonthDays = new Date(calendarYear, calendarMonth, 0).getDate();
+  for (var i = startDay - 1; i >= 0; i--) {
+    html += '<div class="calendar-day other-month">' + (prevMonthDays - i) + '</div>';
+  }
+  for (var d = 1; d <= daysInMonth; d++) {
+    var dateStr = calendarYear + '-' + String(calendarMonth + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    var isToday = d === today.getDate() && calendarMonth === today.getMonth() && calendarYear === today.getFullYear();
+    var hasEvent = eventDates[dateStr];
+    var cls = 'calendar-day' + (isToday ? ' today' : '') + (hasEvent ? ' has-event' : '');
+    html += '<div class="' + cls + '" data-date="' + dateStr + '">' + d + '</div>';
+  }
+  var remaining = 42 - (startDay + daysInMonth);
+  for (var j = 1; j <= remaining && j <= 7; j++) {
+    html += '<div class="calendar-day other-month">' + j + '</div>';
+  }
+  el.calendarGrid.innerHTML = html;
+  el.calendarGrid.querySelectorAll('.calendar-day:not(.other-month)').forEach(function(cell) {
+    cell.addEventListener('click', function() {
+      var date = cell.getAttribute('data-date');
+      var ev = eventDates[date];
+      if (ev) showEventOnDay(ev);
+    });
+  });
+  renderCalendarEvents();
+}
+
+function renderCalendarEvents() {
+  if (!el.calendarEventsList) return;
+  var now = new Date();
+  var upcoming = calendarEvents.filter(function(ev) {
+    if (!ev.date) return false;
+    return ev.date >= (now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0'));
+  }).slice(0, 10);
+  if (upcoming.length === 0) {
+    el.calendarEventsList.innerHTML = '<div class="carta-empty" style="padding:20px;">No hay eventos próximos</div>';
+    return;
+  }
+  el.calendarEventsList.innerHTML = '';
+  upcoming.forEach(function(ev) {
+    var item = document.createElement('div');
+    item.className = 'calendar-event-item';
+    var icon = document.createElement('span');
+    icon.className = 'calendar-event-icon';
+    icon.textContent = EVENT_ICONS[ev.type] || '📌';
+    var info = document.createElement('div');
+    info.className = 'calendar-event-info';
+    var name = document.createElement('div');
+    name.className = 'calendar-event-name';
+    name.textContent = ev.title || 'Sin nombre';
+    var date = document.createElement('div');
+    date.className = 'calendar-event-date';
+    var d = new Date(ev.date + 'T00:00:00');
+    date.textContent = d.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' }) + (ev.repeat ? ' 🔄' : '');
+    info.appendChild(name);
+    info.appendChild(date);
+    var del = document.createElement('button');
+    del.className = 'calendar-event-del';
+    del.innerHTML = '✕';
+    del.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (confirm('¿Eliminar este evento?')) {
+        db.collection(CALENDAR_COLLECTION).doc(ev.id).delete().catch(function(){});
+      }
+    });
+    item.appendChild(icon);
+    item.appendChild(info);
+    item.appendChild(del);
+    el.calendarEventsList.appendChild(item);
+  });
+}
+
+function showEventOnDay(ev) {
+  var msg = (EVENT_ICONS[ev.type] || '📌') + ' ' + (ev.title || 'Sin nombre');
+  if (ev.repeat) msg += ' (se repite cada año)';
+  showInfo(msg);
+}
+
+function saveCalendarEvent() {
+  var title = el.eventTitleInput ? el.eventTitleInput.value.trim() : '';
+  var date = el.eventDateInput ? el.eventDateInput.value : '';
+  var type = el.eventTypeSelect ? el.eventTypeSelect.value : 'other';
+  var repeat = el.eventRepeatCheck ? el.eventRepeatCheck.checked : false;
+  if (!title) { showError('Escribe un nombre para el evento'); return; }
+  if (!date) { showError('Selecciona una fecha'); return; }
+  db.collection(CALENDAR_COLLECTION).add({
+    title: title, date: date, type: type, repeat: repeat,
+    createdAtMs: Date.now(), createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    uid: currentUser.uid, autor: username || ''
+  }).then(function() {
+    showSuccess('Evento guardado');
+    if (el.eventModal) el.eventModal.style.display = 'none';
+  }).catch(function(e) {
+    console.error('Calendar error:', e);
+    showError('No se pudo guardar');
+  });
+}
+
+/* ===== DETAILED STATISTICS ===== */
+function openDetailedStats() {
+  if (el.detailedStatsModal) el.detailedStatsModal.style.display = 'flex';
+  renderDetailedStats();
+}
+
+function renderDetailedStats() {
+  if (!el.dsTotal) return;
+  var msgs = allMessages;
+  el.dsTotal.textContent = msgs.length;
+  var daySet = {};
+  msgs.forEach(function(m) {
+    var ts = m.timestamp || m.localTimestamp || 0;
+    if (ts) { var d = new Date(ts).toDateString(); daySet[d] = true; }
+  });
+  el.dsDays.textContent = Object.keys(daySet).length;
+  drawDailyChart(msgs);
+  drawHourlyChart(msgs);
+  drawPieChart(msgs);
+  drawTopDays(msgs);
+}
+
+function drawDailyChart(msgs) {
+  var canvas = document.getElementById('chart-daily');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  var days = [];
+  var now = new Date();
+  for (var i = 13; i >= 0; i--) {
+    var d = new Date(now);
+    d.setDate(d.getDate() - i);
+    var key = d.toDateString();
+    var count = msgs.filter(function(m) { return new Date(m.timestamp || m.localTimestamp || 0).toDateString() === key; }).length;
+    days.push({ label: d.getDate() + '/' + (d.getMonth() + 1), count: count });
+  }
+  var maxVal = Math.max.apply(null, days.map(function(d) { return d.count; })) || 1;
+  var barW = (w - 40) / days.length;
+  var barArea = h - 40;
+  ctx.fillStyle = '#e5e7eb';
+  ctx.fillRect(35, h - 25, w - 40, 1);
+  days.forEach(function(day, i) {
+    var barH = (day.count / maxVal) * barArea;
+    var x = 35 + i * barW + barW * 0.2;
+    var bw = barW * 0.6;
+    var gradient = ctx.createLinearGradient(0, h - 25 - barH, 0, h - 25);
+    gradient.addColorStop(0, '#8d1b3d');
+    gradient.addColorStop(1, '#6c0028');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.roundRect(x, h - 25 - barH, bw, barH, [3, 3, 0, 0]);
+    ctx.fill();
+    if (day.count > 0) {
+      ctx.fillStyle = '#6c0028';
+      ctx.font = '10px Manrope';
+      ctx.textAlign = 'center';
+      ctx.fillText(day.count, x + bw / 2, h - 28 - barH);
+    }
+    ctx.fillStyle = '#8a7174';
+    ctx.font = '9px Manrope';
+    ctx.textAlign = 'center';
+    ctx.fillText(day.label, x + bw / 2, h - 8);
+  });
+}
+
+function drawHourlyChart(msgs) {
+  var canvas = document.getElementById('chart-hourly');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  var hours = new Array(24).fill(0);
+  msgs.forEach(function(m) {
+    var h2 = new Date(m.timestamp || m.localTimestamp || 0).getHours();
+    hours[h2]++;
+  });
+  var maxVal = Math.max.apply(null, hours) || 1;
+  var barW = (w - 30) / 24;
+  hours.forEach(function(count, i) {
+    var barH = (count / maxVal) * (h - 35);
+    var x = 25 + i * barW + barW * 0.15;
+    var bw = barW * 0.7;
+    var gradient = ctx.createLinearGradient(0, h - 20 - barH, 0, h - 20);
+    gradient.addColorStop(0, '#f59e0b');
+    gradient.addColorStop(1, '#d97706');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.roundRect(x, h - 20 - barH, bw, barH, [2, 2, 0, 0]);
+    ctx.fill();
+    if (i % 3 === 0) {
+      ctx.fillStyle = '#8a7174';
+      ctx.font = '9px Manrope';
+      ctx.textAlign = 'center';
+      ctx.fillText(i + 'h', x + bw / 2, h - 6);
+    }
+  });
+}
+
+function drawPieChart(msgs) {
+  var canvas = document.getElementById('chart-pie');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  var myUid = currentUser ? currentUser.uid : '';
+  var mine = msgs.filter(function(m) { return m.uid === myUid; }).length;
+  var partner = msgs.length - mine;
+  var total = msgs.length || 1;
+  var centerX = w / 2, centerY = h / 2, r = Math.min(w, h) / 2 - 30;
+  var startAngle = -Math.PI / 2;
+  if (mine > 0) {
+    var mineAngle = (mine / total) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.arc(centerX, centerY, r, startAngle, startAngle + mineAngle);
+    ctx.closePath();
+    ctx.fillStyle = '#6c0028';
+    ctx.fill();
+    var midAngle = startAngle + mineAngle / 2;
+    var lx = centerX + Math.cos(midAngle) * (r * 0.65);
+    var ly = centerY + Math.sin(midAngle) * (r * 0.65);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px Manrope';
+    ctx.textAlign = 'center';
+    ctx.fillText(mine, lx, ly + 4);
+    startAngle += mineAngle;
+  }
+  if (partner > 0) {
+    var partnerAngle = (partner / total) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.arc(centerX, centerY, r, startAngle, startAngle + partnerAngle);
+    ctx.closePath();
+    ctx.fillStyle = '#f59e0b';
+    ctx.fill();
+    var midAngle2 = startAngle + partnerAngle / 2;
+    var lx2 = centerX + Math.cos(midAngle2) * (r * 0.65);
+    var ly2 = centerY + Math.sin(midAngle2) * (r * 0.65);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px Manrope';
+    ctx.textAlign = 'center';
+    ctx.fillText(partner, lx2, ly2 + 4);
+  }
+  ctx.fillStyle = '#6c0028';
+  ctx.font = '11px Manrope';
+  ctx.textAlign = 'left';
+  ctx.fillRect(w - 120, 10, 10, 10);
+  ctx.fillText('Tú', w - 105, 19);
+  ctx.fillStyle = '#f59e0b';
+  ctx.fillRect(w - 120, 28, 10, 10);
+  ctx.fillText('Pareja', w - 105, 37);
+}
+
+function drawTopDays(msgs) {
+  var container = document.getElementById('stats-top-days');
+  if (!container) return;
+  var dayCounts = {};
+  msgs.forEach(function(m) {
+    var d = new Date(m.timestamp || m.localTimestamp || 0);
+    var key = d.toDateString();
+    if (!dayCounts[key]) dayCounts[key] = { label: d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' }), count: 0 };
+    dayCounts[key].count++;
+  });
+  var sorted = Object.values(dayCounts).sort(function(a, b) { return b.count - a.count; }).slice(0, 5);
+  var maxCount = sorted.length > 0 ? sorted[0].count : 1;
+  container.innerHTML = '';
+  sorted.forEach(function(day) {
+    var row = document.createElement('div');
+    row.className = 'stats-top-day';
+    var name = document.createElement('span');
+    name.className = 'stats-top-day-name';
+    name.textContent = day.label;
+    var bar = document.createElement('div');
+    bar.className = 'stats-top-day-bar';
+    bar.style.width = Math.round((day.count / maxCount) * 100) + '%';
+    var count = document.createElement('span');
+    count.className = 'stats-top-day-count';
+    count.textContent = day.count;
+    row.appendChild(name);
+    row.appendChild(bar);
+    row.appendChild(count);
+    container.appendChild(row);
+  });
+}
 function openMediaGallery() {
   if (!el.mediaGalleryModal || !el.mediaGalleryGrid) return;
   el.mediaGalleryGrid.innerHTML = '';
@@ -2813,6 +3138,7 @@ document.addEventListener('DOMContentLoaded', function() {
     mediaGalleryGrid: document.getElementById('media-gallery-grid'),
     mediaCount: document.getElementById('media-count'),
     cartasRow: document.getElementById('cartas-row'),
+    calendarRow: document.getElementById('calendar-row'),
     cartasUnreadBadge: document.getElementById('cartas-unread-badge'),
     cartasModal: document.getElementById('cartas-modal'),
     cartasCloseBtn: document.getElementById('cartas-close-btn'),
@@ -2853,7 +3179,28 @@ document.addEventListener('DOMContentLoaded', function() {
     statSent: document.getElementById('stat-sent'),
     statReceived: document.getElementById('stat-received'),
     statRead: document.getElementById('stat-read'),
-    statUnread: document.getElementById('stat-unread')
+    statUnread: document.getElementById('stat-unread'),
+    calendarModal: document.getElementById('calendar-modal'),
+    calendarCloseBtn: document.getElementById('calendar-close-btn'),
+    calendarPrevBtn: document.getElementById('calendar-prev-btn'),
+    calendarNextBtn: document.getElementById('calendar-next-btn'),
+    calendarMonthLabel: document.getElementById('calendar-month-label'),
+    calendarGrid: document.getElementById('calendar-grid'),
+    calendarEventsList: document.getElementById('calendar-events-list'),
+    calendarAddBtn: document.getElementById('calendar-add-btn'),
+    calendarCount: document.getElementById('calendar-count'),
+    eventModal: document.getElementById('event-modal'),
+    eventTitleInput: document.getElementById('event-title-input'),
+    eventDateInput: document.getElementById('event-date-input'),
+    eventTypeSelect: document.getElementById('event-type-select'),
+    eventRepeatCheck: document.getElementById('event-repeat-check'),
+    eventCancelBtn: document.getElementById('event-cancel-btn'),
+    eventSaveBtn: document.getElementById('event-save-btn'),
+    detailedStatsModal: document.getElementById('detailed-stats-modal'),
+    detailedStatsBtn: document.getElementById('detailed-stats-btn'),
+    statsCloseBtn: document.getElementById('stats-close-btn'),
+    dsTotal: document.getElementById('ds-total'),
+    dsDays: document.getElementById('ds-days')
   };
 
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
@@ -3191,6 +3538,28 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.destacadosModal) el.destacadosModal.addEventListener('click', function(e) { if (e.target === el.destacadosModal) hideDestacadosModal(); });
   if (el.shareDestacadosToggle) el.shareDestacadosToggle.addEventListener('change', toggleShareDestacados);
 
+  /* CALENDAR */
+  if (el.calendarRow) el.calendarRow = document.getElementById('calendar-row');
+  if (el.calendarRow) el.calendarRow.addEventListener('click', function() { closeMoreModal(); openCalendarModal(); });
+  if (el.calendarCloseBtn) el.calendarCloseBtn.addEventListener('click', closeCalendarModal);
+  if (el.calendarModal) el.calendarModal.addEventListener('click', function(e) { if (e.target === el.calendarModal) closeCalendarModal(); });
+  if (el.calendarPrevBtn) el.calendarPrevBtn.addEventListener('click', function() { calendarMonth--; if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; } renderCalendar(); });
+  if (el.calendarNextBtn) el.calendarNextBtn.addEventListener('click', function() { calendarMonth++; if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; } renderCalendar(); });
+  if (el.calendarAddBtn) el.calendarAddBtn.addEventListener('click', function() {
+    if (el.eventModal) el.eventModal.style.display = 'flex';
+    if (el.eventTitleInput) el.eventTitleInput.value = '';
+    if (el.eventDateInput) el.eventDateInput.value = calendarYear + '-' + String(calendarMonth + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
+    if (el.eventRepeatCheck) el.eventRepeatCheck.checked = false;
+    setTimeout(function() { if (el.eventTitleInput) el.eventTitleInput.focus(); }, 120);
+  });
+  if (el.eventCancelBtn) el.eventCancelBtn.addEventListener('click', function() { if (el.eventModal) el.eventModal.style.display = 'none'; });
+  if (el.eventSaveBtn) el.eventSaveBtn.addEventListener('click', saveCalendarEvent);
+
+  /* DETAILED STATS */
+  if (el.detailedStatsBtn) el.detailedStatsBtn.addEventListener('click', function() { closeMoreModal(); openDetailedStats(); });
+  if (el.statsCloseBtn) el.statsCloseBtn.addEventListener('click', function() { if (el.detailedStatsModal) el.detailedStatsModal.style.display = 'none'; });
+  if (el.detailedStatsModal) el.detailedStatsModal.addEventListener('click', function(e) { if (e.target === el.detailedStatsModal) el.detailedStatsModal.style.display = 'none'; });
+
   /* SCROLL */
   var loadingOlder = false;
   function loadOlderMessages() {
@@ -3239,6 +3608,9 @@ document.addEventListener('DOMContentLoaded', function() {
       closeMoreModal();
       closeCartasModal();
       closeCartaReader();
+      closeCalendarModal();
+      if (el.eventModal) el.eventModal.style.display = 'none';
+      if (el.detailedStatsModal) el.detailedStatsModal.style.display = 'none';
       if (el.emojiPicker) el.emojiPicker.classList.add('hidden');
       if (el.imageOptionsModal) el.imageOptionsModal.style.display = 'none';
       if (el.imagePreviewModal) el.imagePreviewModal.style.display = 'none';
