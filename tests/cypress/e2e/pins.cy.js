@@ -1,22 +1,32 @@
 /// <reference types="cypress" />
 
 describe('Pinned Messages (Fijar)', () => {
-  before(() => {
-    cy.visit('/');
-    cy.waitForReady();
-    cy.cleanupFirestore();
-  });
-
-  beforeEach(() => {
-    cy.visit('/');
-    cy.waitForReady('user1');
-    cy.window().then((win) => {
-      // Estado limpio de fijados antes de cada test
-      return win.db.doc('rooms/general').set({ pinnedMessages: [] }, { merge: true });
+function resetPins() {
+  return cy.window().then((win) => {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(resolve, 5000);
+      win.__pinsResetDone = () => { clearTimeout(timeout); resolve(); };
+      win.eval(
+        "db.doc('rooms/general').set({ pinnedMessages: [] }, { merge: true })" +
+        ".then(() => window.__pinsResetDone && window.__pinsResetDone(), () => window.__pinsResetDone && window.__pinsResetDone());"
+      );
     });
-    cy.reload();
-    cy.waitForReady('user1');
   });
+}
+
+before(() => {
+  cy.visit('/');
+  cy.waitForReady();
+  resetPins();
+});
+
+beforeEach(() => {
+  cy.visit('/');
+  cy.waitForReady('user1');
+  resetPins();
+  cy.reload();
+  cy.waitForReady('user1');
+});
 
   it('pins a message: shows bar with preview and pin icon on bubble', () => {
     const msg = `Pin test ${Date.now()}`;
@@ -69,8 +79,16 @@ describe('Pinned Messages (Fijar)', () => {
     // Scroll al inicio para que "ir al fijado" tenga efecto visible
     cy.get('#messages-container').scrollTo('top', { duration: 200 });
     cy.get('#pinned-main').click();
-    cy.contains('.message-wrapper', msg, { timeout: 10000 })
-      .should('have.class', 'highlight-flash');
+    // El highlight se agrega sincrónicamente y dura 2s: verificar sin retry
+    cy.contains('.message-wrapper', msg, { timeout: 10000 }).then($w => {
+      expect($w).to.have.class('highlight-flash');
+    });
+    // El scroll suave tarda: verificar llegada al mensaje CON reintento
+    cy.contains('.message-wrapper', msg, { timeout: 10000 }).should($w => {
+      const rect = $w[0].getBoundingClientRect();
+      expect(rect.top).to.be.greaterThan(-80);
+      expect(rect.bottom).to.be.lessThan(Cypress.config('viewportHeight') + 80);
+    });
   });
 
   it('unpins from the context menu (Desfijar) and from the bar button', () => {
@@ -176,18 +194,17 @@ describe('Pinned Messages (Fijar)', () => {
         .get()
         .then((snap) => {
           const mid = snap.docs[0].id;
-          return win.db.doc('rooms/general').set({
-            pinnedMessages: [{
-              id: mid,
-              texto: msg,
-              autor: 'Mi Amor',
-              pinnedAt: Date.now(),
-              pinnedByUid: 'partner-uid',
-              pinnedByName: 'Mi Amor',
-              hasImage: false,
-              hasAudio: false
-            }]
-          }, { merge: true });
+          const pinData = JSON.stringify({
+            id: mid,
+            texto: msg,
+            autor: 'Mi Amor',
+            pinnedAt: Date.now(),
+            pinnedByUid: 'partner-uid',
+            pinnedByName: 'Mi Amor',
+            hasImage: false,
+            hasAudio: false
+          });
+          win.eval(`db.doc('rooms/general').set({ pinnedMessages: [${pinData}] }, { merge: true })`);
         });
     });
 

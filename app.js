@@ -58,6 +58,7 @@ var currentPinnedId = null;
 var presenceHeartbeatInterval = null;
 var partnerPresenceUnsubscribe = null;
 var pendingImageFiles = [];
+var pendingViewOnce = false;
 var pendingImagePreviews = [];
 var state = {
   mediaRecorder: null, audioChunks: [], recordingTimer: null,
@@ -113,6 +114,16 @@ function showSuccess(msg) {
   t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;z-index:10000';
   document.body.appendChild(t);
   setTimeout(function(){ t.remove(); }, 3000);
+}
+function showInfo(msg) {
+  var old = document.querySelector('.info-toast');
+  if (old) old.remove();
+  var t = document.createElement('div');
+  t.className = 'info-toast';
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#3b82f6;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;z-index:10000';
+  document.body.appendChild(t);
+  setTimeout(function(){ t.remove(); }, 3500);
 }
 function showConfirm(message) {
   return new Promise(function(resolve) {
@@ -313,7 +324,8 @@ function softRefresh() {
   startPinnedListener();
   startTypingListener();
   startWishlistListener();
-  if (isOnline && currentUser) flushOfflineQueue();
+  startCartasListener();
+  if (isOnline && currentUser) { flushOfflineQueue(); flushCartasOfflineQueue(); }
   loadMyProfile();
   loadPartnerProfile();
   showSuccess('Chat sincronizado');
@@ -341,11 +353,15 @@ function setTheme(theme) {
   if (el.themeSelect) el.themeSelect.value = theme;
   var r = document.documentElement;
   r.removeAttribute('data-theme');
+  var effective = theme;
   if (theme === 'system') {
-    r.setAttribute('data-theme', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    effective = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    r.setAttribute('data-theme', effective);
   } else {
     r.setAttribute('data-theme', theme);
   }
+  // El CSS oscuro está keyeado en body.dark-mode
+  document.body.classList.toggle('dark-mode', effective === 'dark');
 }
 
 
@@ -458,6 +474,7 @@ function startPartnerPresenceListener() {
   partnerPresenceUnsubscribe = db.collection(USERS_COLLECTION).where('uid', '!=', currentUser.uid).limit(1).onSnapshot(function(snap) {
     snap.forEach(function(doc) {
       var d = doc.data();
+      partnerRealUid = doc.id;
       var online = d.online === true;
       updateHeaderBadge(online);
     });
@@ -586,6 +603,14 @@ function renderPinnedBanner() {
   }
   var pin = currentPin();
   if (!pin || !el.pinnedPreview) return;
+  // Camino síncrono para texto plano (sin E2EE): cero carrera
+  if (!isEncryptedText(pin.texto)) {
+    var src0 = allMessages.find(function(m){ return m.id === pin.id; });
+    var pre0 = (pin.hasImage || (src0 && (src0.imageBase64 || src0.imageGifUrl))) ? '\uD83D\uDDBC\uFE0F '
+             : ((pin.hasAudio || (src0 && src0.audioBase64)) ? '\uD83C\uDFA4 ' : '');
+    el.pinnedPreview.textContent = pre0 + (pin.texto || '[Mensaje]') + (pin.pinnedByName ? ' \u2014 por ' + pin.pinnedByName : '');
+    return;
+  }
   el.pinnedPreview.textContent = '\u2026';
   fillPinnedPreview(pin, count, sig);
 }
@@ -597,9 +622,9 @@ async function fillPinnedPreview(pin, countAtCall, sigAtCall) {
   if (isImg) prefix = '\uD83D\uDDBC\uFE0F ';
   else if (isAud) prefix = '\uD83C\uDFA4 ';
   var texto = isEncryptedText(pin.texto) ? await decryptText(pin.texto) : (pin.texto || '[Mensaje]');
-  // Guarda: si cambió la lista o el índice mientras decodificábamos, descartar
-  if (pinnedSignature() !== sigAtCall || countAtCall !== pinnedMessages.length) return;
-  if (currentPin() !== pin) return;
+  // Guarda: si cambió la lista, el índice o el mensaje mientras decodificábamos, descartar
+  var cur = currentPin();
+  if (pinnedSignature() !== sigAtCall || countAtCall !== pinnedMessages.length || !cur || cur.id !== pin.id) return;
   var by = pin.pinnedByName ? ' \u2014 por ' + pin.pinnedByName : '';
   if (el.pinnedPreview) el.pinnedPreview.textContent = prefix + texto + by;
 }
@@ -621,6 +646,8 @@ function initializeUser() {
   assignedKey = cfg.key;
   updateHeaderBadge(null);
   if (el.messageInput) el.messageInput.disabled = false;
+  if (el.cartaInput) el.cartaInput.disabled = false;
+  if (el.cartaBody) el.cartaBody.disabled = false;
   if (el.sendBtn) el.sendBtn.disabled = false;
   startMessagesListener();
   startTypingListener();
@@ -633,14 +660,17 @@ function initializeUser() {
   startDestacadosListeners();
   startPartnerShareSettingListener();
   startWishlistListener();
+  startCartasListener();
   initE2ee();
-  if (isOnline) flushOfflineQueue();
+  if (isOnline) { flushOfflineQueue(); flushCartasOfflineQueue(); }
 }
 function cleanupListeners() {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   if (typingUnsubscribe) { typingUnsubscribe(); typingUnsubscribe = null; }
   if (pinnedUnsubscribe) { pinnedUnsubscribe(); pinnedUnsubscribe = null; }
   if (partnerPresenceUnsubscribe) { partnerPresenceUnsubscribe(); partnerPresenceUnsubscribe = null; }
+  if (wishlistUnsubscribe) { wishlistUnsubscribe(); wishlistUnsubscribe = null; }
+  if (cartasUnsubscribe) { cartasUnsubscribe(); cartasUnsubscribe = null; }
   stopPresenceHeartbeat();
 }
 
@@ -653,12 +683,12 @@ function compressImageToBase64(file) {
     reader.onload = function(e) {
       var img = new Image();
       img.onload = function() {
-        var MAX = 800, w = img.width, h = img.height;
+        var MAX = 2560, w = img.width, h = img.height;
         if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
         var c = document.createElement('canvas');
         c.width = w; c.height = h;
         c.getContext('2d').drawImage(img, 0, 0, w, h);
-        var base64 = c.toDataURL('image/jpeg', 0.7);
+        var base64 = c.toDataURL('image/jpeg', 1.0);
         var blur = document.createElement('canvas');
         blur.width = 40; blur.height = Math.round(40 * h / w);
         blur.getContext('2d').drawImage(img, 0, 0, blur.width, blur.height);
@@ -669,6 +699,21 @@ function compressImageToBase64(file) {
     };
     reader.onerror = function(){ reject(new Error('Error reading file')); };
     reader.readAsDataURL(file);
+  });
+}
+function resizeImageForFirestore(base64Src) {
+  return new Promise(function(resolve, reject) {
+    var img = new Image();
+    img.onload = function() {
+      var MAX = 2560, w = img.width, h = img.height;
+      if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+      var c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL('image/jpeg', 1.0));
+    };
+    img.onerror = function(){ reject(new Error('Error loading image')); };
+    img.src = base64Src;
   });
 }
 
@@ -881,6 +926,11 @@ function createMessageElement(msg, isSelf, isGrouped) {
   wrapper.addEventListener('touchend', endTouchSwipe);
   wrapper.addEventListener('touchcancel', endTouchSwipe);
   wrapper.addEventListener('contextmenu', function(e) { e.preventDefault(); showContextMenu(e, msg, isSelf); });
+  bubble.addEventListener('click', function(e) {
+    if (e.target.closest('a') || e.target.closest('button') || e.target.closest('.message-reply')) return;
+    var rect = bubble.getBoundingClientRect();
+    showContextMenu({ clientX: rect.left + rect.width / 2, clientY: rect.top, target: bubble }, msg, isSelf);
+  });
   msgDiv.appendChild(bubble);
   wrapper.appendChild(msgDiv);
   return wrapper;
@@ -906,13 +956,40 @@ function buildBubbleContent(msg, bubble, isSelf) {
     var iw = document.createElement('div');
     iw.className = 'message-image-wrapper';
     if (msg.imageWidth && msg.imageHeight) iw.style.aspectRatio = msg.imageWidth + ' / ' + msg.imageHeight;
-    if (msg.imageBlur) { var bi = document.createElement('img'); bi.src = msg.imageBlur; bi.className = 'message-image-blur'; bi.loading = 'lazy'; iw.appendChild(bi); }
-    var im = document.createElement('img');
-    im.src = msg.imageBase64; im.alt = 'Imagen'; im.className = 'message-image'; im.loading = 'lazy';
-    im.onload = function() { this.classList.add('loaded'); };
-    im.addEventListener('click', function() { openLightbox(msg.imageBase64); });
-    iw.appendChild(im);
-    if (msg.texto) { var c = document.createElement('span'); c.className = 'msg-caption'; c.textContent = getPlainText(msg); iw.appendChild(c); }
+    var isMine = msg.uid === currentUser.uid;
+    var showPlaceholder = msg.viewOnce && !isMine;
+    if (showPlaceholder && msg.viewOnceViewed) {
+      var viewedEl = document.createElement('div');
+      viewedEl.className = 'viewonce-viewed';
+      viewedEl.innerHTML = '<span class="material-symbols-outlined" style="font-size:16px;">visibility_off</span> Imagen vista';
+      iw.appendChild(viewedEl);
+      iw.style.aspectRatio = 'auto';
+    } else if (showPlaceholder) {
+      var ph = document.createElement('div');
+      ph.className = 'viewonce-placeholder';
+      ph.innerHTML = '<span class="material-symbols-outlined viewonce-icon">visibility</span><span class="viewonce-label">Toca para ver una vez</span>';
+      ph.addEventListener('click', function() {
+        db.collection('rooms/' + ROOM_ID + '/messages').doc(msg.id).update({ viewOnceViewed: true }).catch(function(){});
+        msg.viewOnceViewed = true;
+        var imgs = allMessages.filter(function(m) { return m.imageBase64 && !(m.viewOnce && !m.uid_ && m.viewOnceViewed); }).map(function(m) { return m.imageBase64; });
+        var idx = imgs.indexOf(msg.imageBase64);
+        openLightbox(msg.imageBase64, imgs, idx >= 0 ? idx : 0);
+      });
+      iw.appendChild(ph);
+      iw.style.aspectRatio = 'auto';
+    } else {
+      if (msg.imageBlur) { var bi = document.createElement('img'); bi.src = msg.imageBlur; bi.className = 'message-image-blur'; bi.loading = 'lazy'; iw.appendChild(bi); }
+      var im = document.createElement('img');
+      im.src = msg.imageBase64; im.alt = 'Imagen'; im.className = 'message-image'; im.loading = 'lazy';
+      im.onload = function() { this.classList.add('loaded'); };
+      im.addEventListener('click', function() {
+        var imgs = allMessages.filter(function(m) { return m.imageBase64; }).map(function(m) { return m.imageBase64; });
+        var idx = imgs.indexOf(msg.imageBase64);
+        openLightbox(msg.imageBase64, imgs, idx >= 0 ? idx : 0);
+      });
+      iw.appendChild(im);
+    }
+    if (msg.texto && !showPlaceholder) { var c = document.createElement('span'); c.className = 'msg-caption'; c.textContent = getPlainText(msg); iw.appendChild(c); }
     bubble.appendChild(iw);
     bubble.classList.add('has-image');
   } else if (msg.imageGifUrl) {
@@ -930,32 +1007,84 @@ function buildBubbleContent(msg, bubble, isSelf) {
     bubble.classList.add('has-image');
   } else if (msg.audioBase64) {
     var aw = document.createElement('div');
-    aw.className = 'msg-audio';
-    var au = document.createElement('audio');
-    au.src = msg.audioBase64; au.controls = true; au.preload = 'metadata';
-    aw.appendChild(au);
-    var wf = document.createElement('div');
-    wf.className = 'audio-waveform';
-    var barCount = 30;
-    var seed = 0;
-    for (var si = 0; si < (msg.id || '').length; si++) { seed = ((seed << 5) - seed + (msg.id || '').charCodeAt(si)) | 0; }
-    for (var i = 0; i < barCount; i++) {
-      var b = document.createElement('span');
-      b.className = 'waveform-bar';
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      b.style.height = (8 + (seed % 25)) + 'px';
-      wf.appendChild(b);
+    aw.className = 'msg-audio-player';
+    var playBtn = document.createElement('button');
+    playBtn.type = 'button';
+    playBtn.className = 'audio-play-btn';
+    playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+    var trackWrap = document.createElement('div');
+    trackWrap.className = 'audio-track-wrap';
+    var progress = document.createElement('div');
+    progress.className = 'audio-progress';
+    var progressFill = document.createElement('div');
+    progressFill.className = 'audio-progress-fill';
+    progress.appendChild(progressFill);
+    var waveform = document.createElement('div');
+    waveform.className = 'audio-waveform-v2';
+    var barCount = 35;
+    for (var wi = 0; wi < barCount; wi++) {
+      var bar = document.createElement('span');
+      bar.className = 'wave-bar';
+      bar.style.height = (4 + Math.random() * 18) + 'px';
+      waveform.appendChild(bar);
     }
-    aw.appendChild(wf);
-    var dur = document.createElement('span');
-    dur.className = 'audio-duration';
-    dur.textContent = '--:--';
+    trackWrap.appendChild(progress);
+    trackWrap.appendChild(waveform);
+    var timeLabel = document.createElement('span');
+    timeLabel.className = 'audio-time-label';
+    timeLabel.textContent = '0:00';
+    aw.appendChild(playBtn);
+    aw.appendChild(trackWrap);
+    aw.appendChild(timeLabel);
+    var au = document.createElement('audio');
+    au.src = msg.audioBase64;
+    au.preload = 'metadata';
+    au.style.display = 'none';
+    aw.appendChild(au);
+    var playing = false;
+    function fmtTime(s) {
+      if (!isFinite(s)) return '0:00';
+      var t = Math.round(s);
+      return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+    }
     au.addEventListener('loadedmetadata', function() {
-      if (!isFinite(au.duration)) return;
-      var t = Math.round(au.duration);
-      dur.textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+      timeLabel.textContent = '0:00 / ' + fmtTime(au.duration);
     });
-    aw.appendChild(dur);
+    au.addEventListener('timeupdate', function() {
+      if (!au.duration) return;
+      var pct = (au.currentTime / au.duration) * 100;
+      progressFill.style.width = pct + '%';
+      timeLabel.textContent = fmtTime(au.currentTime) + ' / ' + fmtTime(au.duration);
+    });
+    au.addEventListener('ended', function() {
+      playing = false;
+      playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+      playBtn.classList.remove('playing');
+      progressFill.style.width = '0%';
+    });
+    playBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (playing) { au.pause(); }
+      else { au.play().catch(function(){}); }
+      playing = !playing;
+      playBtn.innerHTML = playing
+        ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+      playBtn.classList.toggle('playing', playing);
+    });
+    var dragging = false;
+    function scrub(e) {
+      var rect = progress.getBoundingClientRect();
+      var x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      if (au.duration) { au.currentTime = x * au.duration; }
+      progressFill.style.width = (x * 100) + '%';
+    }
+    progress.addEventListener('mousedown', function(e) { dragging = true; scrub(e); });
+    progress.addEventListener('touchstart', function(e) { dragging = true; scrub(e.touches[0]); }, { passive: true });
+    document.addEventListener('mousemove', function(e) { if (dragging) scrub(e); });
+    document.addEventListener('touchmove', function(e) { if (dragging) scrub(e.touches[0]); }, { passive: true });
+    document.addEventListener('mouseup', function() { dragging = false; });
+    document.addEventListener('touchend', function() { dragging = false; });
     if (msg.audioBase64.indexOf('data:audio') === 0) {
       try {
         var raw = msg.audioBase64.split(',')[1];
@@ -966,20 +1095,20 @@ function buildBubbleContent(msg, bubble, isSelf) {
         audioCtx.decodeAudioData(arr.buffer).then(function(buffer) {
           var raw_data = buffer.getChannelData(0);
           var step = Math.floor(raw_data.length / barCount);
-          var bars = wf.querySelectorAll('.waveform-bar');
-          for (var wi = 0; wi < bars.length; wi++) {
-            var start = wi * step;
+          var bars = waveform.querySelectorAll('.wave-bar');
+          for (var bi = 0; bi < bars.length; bi++) {
+            var start = bi * step;
             var sum = 0;
             for (var j = 0; j < step && start + j < raw_data.length; j++) { sum += Math.abs(raw_data[start + j]); }
             var avg = sum / step;
-            var h = Math.max(4, Math.min(32, Math.round(avg * 60)));
-            bars[wi].style.height = h + 'px';
+            bars[bi].style.height = Math.max(4, Math.min(32, Math.round(avg * 80))) + 'px';
           }
           audioCtx.close();
         }).catch(function(){});
       } catch(e){}
     }
     bubble.appendChild(aw);
+    bubble.classList.add('has-audio');
   }
   if (msg.texto && !msg.imageBase64) {
     var te = document.createElement('span');
@@ -1056,7 +1185,7 @@ async function buildAndSend(msgId, plainText, currentReply, imageData, audioData
   var data = { id: msgId, autor: username, uid: currentUser.uid, timestamp: firebase.firestore.FieldValue.serverTimestamp(), localTimestamp: Date.now(), reactions: {}, texto: cipherText };
   if (imageData) {
     if (imageData.gifUrl) { data.imageGifUrl = imageData.url; data.imageWidth = imageData.w || 0; data.imageHeight = imageData.h || 0; }
-    else { data.imageBase64 = imageData.base64; data.imageBlur = imageData.blurPlaceholder; data.imageWidth = imageData.width; data.imageHeight = imageData.height; }
+    else { data.imageBase64 = imageData.base64; data.imageBlur = imageData.blurPlaceholder; data.imageWidth = imageData.width; data.imageHeight = imageData.height; if (imageData.viewOnce) data.viewOnce = true; }
   }
   if (audioData) { data.audioBase64 = audioData.base64; data.audioMimeType = audioData.mimeType || 'audio/webm'; }
   decryptedMap[msgId] = { texto: plainText };
@@ -1072,8 +1201,8 @@ function sendToFirestoreOrQueue(data, msgId) {
     db.collection(MESSAGES_COLLECTION).doc(msgId).set(data).catch(function(e) { console.error('Send error:', e); addToOfflineQueue(data); });
   } else { addToOfflineQueue(data); }
 }
-function sendImageMessage(base64, blur, w, h, caption) {
-  sendMessage(caption || '', { base64: base64, blurPlaceholder: blur, width: w, height: h }, null);
+function sendImageMessage(base64, blur, w, h, caption, viewOnce) {
+  sendMessage(caption || '', { base64: base64, blurPlaceholder: blur, width: w, height: h, viewOnce: !!viewOnce }, null);
 }
 function sendAudioMessage(chunks, mimeType) {
   if (!currentUser) return;
@@ -1129,6 +1258,7 @@ function toggleReaction(msgId, emoji) {
     if (uids.length === 0) { delete reactions[emoji]; }
     else { reactions[emoji] = uids; }
   } else {
+    // Quitar MI reacción de otros emojis y AÑADIRME al emoji nuevo (conservando a mi pareja)
     Object.keys(reactions).forEach(function(e) {
       var arr = reactions[e] ? reactions[e].slice() : [];
       var i = arr.indexOf(currentUser.uid);
@@ -1136,8 +1266,9 @@ function toggleReaction(msgId, emoji) {
       if (arr.length === 0) { delete reactions[e]; }
       else { reactions[e] = arr; }
     });
-    uids = [currentUser.uid];
-    reactions[emoji] = uids;
+    var target = reactions[emoji] ? reactions[emoji].slice() : [];
+    if (target.indexOf(currentUser.uid) < 0) target.push(currentUser.uid);
+    reactions[emoji] = target;
   }
   
   var msgIndex = allMessages.findIndex(function(m){ return m.id === msgId; });
@@ -1159,7 +1290,8 @@ function setReplyPreview(msg) {
   var content = el.replyPreview.querySelector('.reply-preview-content');
   if (content) {
     var txt = msg.texto ? getPlainText(msg).substring(0, 60) : (msg.imageBase64 ? 'Imagen' : msg.audioBase64 ? 'Audio' : '');
-    content.innerHTML = '<strong>' + escapeHtml(msg.autor || '') + '</strong>: ' + escapeHtml(txt);
+    content.innerHTML = '<strong class="reply-preview-author">' + escapeHtml(msg.autor || '') + '</strong>' +
+      '<span class="reply-preview-text">' + escapeHtml(txt) + '</span>';
   }
   el.replyPreview.style.display = 'flex';
 }
@@ -1417,18 +1549,172 @@ function searchPrev() {
   el._searchMatches[el._searchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
   updateSearchCount(el._searchIndex + 1, el._searchMatches.length);
 }
-function openLightbox(src) {
+function openLightbox(src, allImages, curIdx) {
+  if (!allImages) allImages = [src];
+  if (curIdx == null) curIdx = 0;
   var ov = document.createElement('div');
-  ov.className = 'lightbox-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:9999;display:flex;align-items:center;justify-content:center';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:9999;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none';
   var img = document.createElement('img');
-  img.src = src; img.style.cssText = 'max-width:95%;max-height:95%;object-fit:contain;border-radius:4px';
+  img.src = src;
+  img.style.cssText = 'max-width:95%;max-height:85%;object-fit:contain;border-radius:4px;will-change:transform;-webkit-user-drag:none;touch-action:none;transition:opacity .15s';
   ov.appendChild(img);
+
+  var counter = document.createElement('div');
+  counter.style.cssText = 'position:absolute;top:16px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.7);font-size:13px;z-index:10;font-variant-numeric:tabular-nums';
+  counter.textContent = (curIdx + 1) + ' / ' + allImages.length;
+  if (allImages.length <= 1) counter.style.display = 'none';
+  ov.appendChild(counter);
+
+  var prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.innerHTML = '\u25C0';
+  prevBtn.style.cssText = 'position:absolute;left:10px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.12);color:#fff;border:none;width:40px;height:40px;border-radius:50%;font-size:18px;cursor:pointer;z-index:10;backdrop-filter:blur(4px);display:' + (allImages.length > 1 ? 'flex' : 'none') + ';align-items:center;justify-content:center';
+  var nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.innerHTML = '\u25B6';
+  nextBtn.style.cssText = 'position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.12);color:#fff;border:none;width:40px;height:40px;border-radius:50%;font-size:18px;cursor:pointer;z-index:10;backdrop-filter:blur(4px);display:' + (allImages.length > 1 ? 'flex' : 'none') + ';align-items:center;justify-content:center';
+  ov.appendChild(prevBtn);
+  ov.appendChild(nextBtn);
+
+  var actions = document.createElement('div');
+  actions.style.cssText = 'position:absolute;bottom:24px;left:50%;transform:translateX(-50%);display:flex;gap:16px;z-index:10';
+  var dl = document.createElement('button');
+  dl.textContent = '\u2B07 Descargar';
+  dl.style.cssText = 'background:rgba(255,255,255,.15);color:#fff;border:none;padding:10px 20px;border-radius:20px;font-size:14px;cursor:pointer;backdrop-filter:blur(4px)';
+  dl.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var a = document.createElement('a'); a.href = img.src; a.download = 'imagen-' + Date.now() + '.jpg';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  });
+  actions.appendChild(dl);
   var cb = document.createElement('button');
-  cb.textContent = 'X'; cb.style.cssText = 'position:absolute;top:16px;right:16px;background:none;color:#fff;font-size:24px;border:none;cursor:pointer';
+  cb.textContent = '\u2715 Cerrar';
+  cb.style.cssText = 'background:rgba(255,255,255,.15);color:#fff;border:none;padding:10px 20px;border-radius:20px;font-size:14px;cursor:pointer;backdrop-filter:blur(4px)';
   cb.addEventListener('click', function(e) { e.stopPropagation(); ov.remove(); });
-  ov.appendChild(cb);
-  ov.addEventListener('click', function() { ov.remove(); });
+  actions.appendChild(cb);
+  ov.appendChild(actions);
+
+  var sc = 1, tx = 0, ty = 0;
+  var pDist = 0, pSc = 1, pinching = false;
+  var tapT = 0, dragging = false, dX = 0, dY = 0, sTx = 0, sTy = 0;
+
+  function apply() {
+    if (sc < 1) { sc = 1; tx = 0; ty = 0; }
+    if (sc > 5) sc = 5;
+    if (sc <= 1) { tx = 0; ty = 0; }
+    img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + sc + ')';
+  }
+  function resetZoom() { sc = 1; tx = 0; ty = 0; apply(); }
+  function navigate(newIdx) {
+    if (newIdx < 0 || newIdx >= allImages.length) return;
+    curIdx = newIdx;
+    resetZoom();
+    img.style.opacity = '0';
+    setTimeout(function() {
+      img.src = allImages[curIdx];
+      img.style.opacity = '1';
+      counter.textContent = (curIdx + 1) + ' / ' + allImages.length;
+    }, 100);
+  }
+  prevBtn.addEventListener('click', function(e) { e.stopPropagation(); navigate(curIdx - 1); });
+  nextBtn.addEventListener('click', function(e) { e.stopPropagation(); navigate(curIdx + 1); });
+
+  function pd(a, b) {
+    return Math.sqrt(Math.pow(a.clientX - b.clientX, 2) + Math.pow(a.clientY - b.clientY, 2));
+  }
+
+  ov.addEventListener('touchstart', function(e) {
+    if (e.target.closest && e.target.closest('[style*="z-index:10"]')) return;
+    if (e.touches.length === 2) {
+      pinching = true;
+      pDist = pd(e.touches[0], e.touches[1]);
+      pSc = sc;
+      e.preventDefault();
+    } else if (e.touches.length === 1 && !pinching) {
+      var now = Date.now();
+      if (now - tapT < 300) {
+        sc = (sc === 1) ? 2.5 : 1;
+        if (sc === 1) { tx = 0; ty = 0; }
+        apply();
+        tapT = 0;
+      } else {
+        tapT = now;
+        if (sc > 1) {
+          dragging = true;
+          dX = e.touches[0].clientX;
+          dY = e.touches[0].clientY;
+          sTx = tx; sTy = ty;
+          e.preventDefault();
+        } else {
+          swipeX = e.touches[0].clientX;
+          swipeY = e.touches[0].clientY;
+          swipeActive = true;
+        }
+      }
+    }
+  }, { passive: false });
+
+  var swipeX = 0, swipeY = 0, swipeActive = false;
+
+  ov.addEventListener('touchmove', function(e) {
+    if (pinching && e.touches.length === 2) {
+      e.preventDefault();
+      sc = pSc * (pd(e.touches[0], e.touches[1]) / pDist);
+      apply();
+    } else if (dragging && e.touches.length === 1 && sc > 1) {
+      e.preventDefault();
+      tx = sTx + (e.touches[0].clientX - dX);
+      ty = sTy + (e.touches[0].clientY - dY);
+      apply();
+    } else if (swipeActive && e.touches.length === 1 && sc <= 1) {
+      var dx = e.touches[0].clientX - swipeX;
+      var dy = e.touches[0].clientY - swipeY;
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        swipeActive = false;
+        if (dx < 0 && curIdx < allImages.length - 1) navigate(curIdx + 1);
+        else if (dx > 0 && curIdx > 0) navigate(curIdx - 1);
+      }
+    }
+  }, { passive: false });
+
+  ov.addEventListener('touchend', function(e) {
+    if (e.touches.length < 2) pinching = false;
+    if (e.touches.length === 0) { dragging = false; swipeActive = false; }
+  });
+
+  ov.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false });
+  ov.addEventListener('gesturechange', function(e) {
+    e.preventDefault();
+    sc = Math.max(1, Math.min(5, e.scale));
+    apply();
+  }, { passive: false });
+  ov.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
+
+  ov.addEventListener('wheel', function(e) {
+    if (e.target.closest && e.target.closest('[style*="z-index:10"]')) return;
+    e.preventDefault();
+    sc += e.deltaY > 0 ? -0.15 : 0.15;
+    apply();
+  }, { passive: false });
+
+  ov.addEventListener('dblclick', function(e) {
+    if (e.target.closest && e.target.closest('[style*="z-index:10"]')) return;
+    sc = (sc === 1) ? 2.5 : 1;
+    if (sc === 1) { tx = 0; ty = 0; }
+    apply();
+  });
+
+  ov.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowLeft') navigate(curIdx - 1);
+    else if (e.key === 'ArrowRight') navigate(curIdx + 1);
+    else if (e.key === 'Escape') ov.remove();
+  });
+  ov.setAttribute('tabindex', '0');
+  setTimeout(function() { ov.focus(); }, 50);
+
+  ov.addEventListener('click', function(e) {
+    if (e.target === ov) ov.remove();
+  });
   document.body.appendChild(ov);
 }
 var mediaStream = null;
@@ -1500,17 +1786,19 @@ function showImagePreviewModal(files) {
   el.imagePreviewModal.style.display = 'flex';
 }
 function hideImagePreviewModal() {
-  pendingImageFiles = []; pendingImagePreviews = [];
+  pendingImageFiles = []; pendingImagePreviews = []; pendingViewOnce = false;
   if (el.imagePreviewModal) el.imagePreviewModal.style.display = 'none';
   if (el.imagePreviewContainer) el.imagePreviewContainer.innerHTML = '';
   if (el.imageCaptionInput) el.imageCaptionInput.value = '';
+  if (el.previewViewOnceBtn) { el.previewViewOnceBtn.classList.remove('active'); el.previewViewOnceBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">visibility</span> Ver una vez'; }
 }
 function sendPendingImages() {
   if (pendingImageFiles.length === 0) return;
   var caption = el.imageCaptionInput ? el.imageCaptionInput.value.trim() : '';
+  var viewOnce = pendingViewOnce;
   pendingImageFiles.forEach(function(file, i) {
     compressImageToBase64(file).then(function(r) {
-      sendImageMessage(r.base64, r.blurPlaceholder, r.width, r.height, i === 0 ? caption : '');
+      sendImageMessage(r.base64, r.blurPlaceholder, r.width, r.height, i === 0 ? caption : '', viewOnce);
     }).catch(function() { showError('Error al enviar imagen'); });
   });
   hideImagePreviewModal();
@@ -1542,13 +1830,19 @@ function loadMyProfile() {
   if (!currentUser) return;
   db.collection(USERS_COLLECTION).doc(currentUser.uid).get().then(function(doc) {
     if (doc.exists) { var d = doc.data(); myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' }; }
+    if (myProfile.username) username = myProfile.username;
+    updateMyProfileUI();
   }).catch(function(){});
 }
 function loadPartnerProfile() {
   var partner = getPartnerConfig();
   if (!partner) return;
   db.collection(USERS_COLLECTION).where('uid', '!=', currentUser.uid).limit(1).get().then(function(snap) {
-    if (!snap.empty) { var d = snap.docs[0].data(); partnerProfile = { username: d.username || partner.name, avatarBase64: d.avatarBase64 || '', bio: d.bio || '' }; }
+    if (!snap.empty) {
+      partnerRealUid = snap.docs[0].id;
+      var d = snap.docs[0].data();
+      partnerProfile = { username: d.username || partner.name, avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
+    }
     else { partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; }
     updateMyProfileUI(); updatePartnerProfileUI(); updateHeaderBadge(null);
   }).catch(function(){ partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; updateMyProfileUI(); updatePartnerProfileUI(); });
@@ -1573,7 +1867,9 @@ function updateHeaderPartnerAvatar() {
   var img = document.getElementById('header-partner-img');
   var initial = document.getElementById('header-partner-initial');
   var headerName = document.getElementById('header-partner-name');
+  var headerBio = document.getElementById('header-partner-bio');
   if (headerName) headerName.textContent = name;
+  if (headerBio) headerBio.textContent = partnerProfile.bio || '';
   if (avatar && img) {
     img.src = avatar;
     img.style.display = 'block';
@@ -1589,12 +1885,12 @@ function saveProfile() {
   var name = el.profileNameInput ? el.profileNameInput.value.trim() : '';
   var bio = el.profileBioInput ? el.profileBioInput.value.trim() : '';
   myProfile.username = name; myProfile.bio = bio;
+  if (name) username = name;
   db.collection(USERS_COLLECTION).doc(currentUser.uid).set({
     username: name, bio: bio, avatarBase64: myProfile.avatarBase64,
     uid: currentUser.uid, email: currentUser.email,
     lastActive: firebase.firestore.FieldValue.serverTimestamp()
   }, { merge: true }).then(function() {
-    if (name) username = name;
     showSuccess('Perfil guardado');
   }).catch(function(){ showError('Error al guardar perfil'); });
 }
@@ -1681,6 +1977,11 @@ function exitSubPanel(panel) {
 }
 async function showDestacadosModal(type) {
   if (!el.destacadosModal || !el.destacadosList) return;
+  if (type === 'partner' && !partnerShares) {
+    el.destacadosList.innerHTML = '<p style="text-align:center;padding:20px;color:#999">Tu pareja no ha compartido sus destacados</p>';
+    enterSubPanel(el.destacadosModal);
+    return;
+  }
   enterSubPanel(el.destacadosModal);
   el.destacadosList.innerHTML = '<p style="text-align:center;padding:20px;color:#999">Cargando…</p>';
   var title = el.destacadosModal.querySelector('.destacados-title');
@@ -1705,6 +2006,385 @@ function scrollToMessage(msgId) {
   if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); w.classList.add('highlight-flash'); setTimeout(function(){ w.classList.remove('highlight-flash'); }, 2000); }
 }
 
+/* ============================================
+   BUZÓN DE CARTAS 💌
+   ============================================ */
+var CARTAS_COLLECTION = 'rooms/' + ROOM_ID + '/cartas';
+var cartasUnsubscribe = null;
+var cartasItems = [];
+var cartasTab = 'in';
+var currentCarta = null;
+var partnerRealUid = '';
+var cartaPlainMap = {};
+var pendingCartas = {};
+var cartaSelectedImage = null;
+var cartaScheduledDate = null;
+
+var CARTA_TEMPLATES = {
+  'cumple': { greeting: 'Feliz Cumpleaños', body: 'Hoy celebro el día en que llegaste al mundo y alegraste el mío. Eres lo más hermoso que me ha pasado. Te amo con todo mi ser. 🎂💕' },
+  'aniversario': { greeting: 'Mi Amor', body: 'Cada día a tu lado es un regalo. Gracias por caminar conmigo en este camino lleno de amor. Feliz aniversario, mi vida. 💕' },
+  'buenos-dias': { greeting: 'Buenos Días, Mi Vida', body: 'Que este nuevo día traiga sonrisas a tu rostro y amor a tu corazón. Estás en cada uno de mis pensamientos. ☀️' },
+  'buenas-noches': { greeting: 'Buenas Noches, Mi Amor', body: 'Cierra los ojos sabiendo que eres mi último pensamiento del día y el primero de mañana. Descansa bonito. 🌙' },
+  'perdon': { greeting: 'Mi Amor', body: 'Sé que cometí un error y lamento profundamente haberte hecho sentir mal. Tu amor es lo más valioso que tengo. Perdóname. 🙏' },
+  'te-extraño': { greeting: 'Te Extraño', body: 'No hay día que pase sin pensar en ti. Tu ausencia se siente en cada rincón de mi corazón. Vuelve pronto. 🥺' },
+  'gracias': { greeting: 'Gracias', body: 'Gracias por ser quien eres, por tu paciencia, tu cariño y tu amor. No cambio nada de ti. Eres perfecta para mí. 💛' },
+  'vacio': { greeting: '', body: '' }
+};
+
+function startCartasListener() {
+  if (!currentUser) return;
+  if (cartasUnsubscribe) { cartasUnsubscribe(); cartasUnsubscribe = null; }
+  cartasUnsubscribe = db.collection(CARTAS_COLLECTION).onSnapshot(function(snap) {
+    var prevUnread = myUnreadCount();
+    cartasItems = [];
+    snap.forEach(function(doc) {
+      // Confirmado por servidor: sale de la lista de pendientes
+      if (pendingCartas[doc.id]) delete pendingCartas[doc.id];
+      cartasItems.push(Object.assign({}, doc.data(), { id: doc.id }));
+    });
+    cartasItems.sort(function(a, b) { return (b.createdAtMs || 0) - (a.createdAtMs || 0); });
+    updateCartasBadges();
+    if (myUnreadCount() > prevUnread) showSuccess('Tienes una carta nueva \uD83D\uDC8C');
+    if (el.cartasModal && el.cartasModal.style.display === 'flex') renderCartasList();
+  }, function(err){ console.error('Cartas listener:', err); });
+}
+function getAllCartasMerged() {
+  var pending = Object.keys(pendingCartas).map(function(k){ return pendingCartas[k]; });
+  return cartasItems.concat(pending).sort(function(a, b) { return (b.createdAtMs || 0) - (a.createdAtMs || 0); });
+}
+function cartaIsForMe(c) {
+  var mySlot = getAssignedUser();
+  return c.paraUid ? c.paraUid === (currentUser && currentUser.uid) : c.paraSlot === mySlot;
+}
+function cartaIsMine(c) {
+  var mySlot = getAssignedUser();
+  return c.deUid ? c.deUid === (currentUser && currentUser.uid) : c.deSlot === mySlot;
+}
+function myUnreadCount() {
+  return cartasItems.filter(function(c){ return cartaIsForMe(c) && !c.leida; }).length;
+}
+function updateCartasBadges() {
+  var n = myUnreadCount();
+  var label = n > 9 ? '9+' : (n > 0 ? String(n) : '');
+  if (el.moreBadge) {
+    el.moreBadge.textContent = label;
+    el.moreBadge.classList.toggle('hidden', n === 0);
+  }
+  if (el.cartasUnreadBadge) {
+    el.cartasUnreadBadge.textContent = label;
+    el.cartasUnreadBadge.classList.toggle('hidden', n === 0);
+  }
+  if (el.cartasInBadge) {
+    el.cartasInBadge.textContent = label;
+    el.cartasInBadge.classList.toggle('hidden', n === 0);
+  }
+}
+function updateCartasStats() {
+  var all = getAllCartasMerged();
+  var sent = all.filter(function(c) { return cartaIsMine(c); }).length;
+  var received = all.filter(function(c) { return cartaIsForMe(c); }).length;
+  var read = all.filter(function(c) { return cartaIsForMe(c) && c.leida; }).length;
+  var unread = all.filter(function(c) { return cartaIsForMe(c) && !c.leida; }).length;
+  if (el.statSent) el.statSent.textContent = sent;
+  if (el.statReceived) el.statReceived.textContent = received;
+  if (el.statRead) el.statRead.textContent = read;
+  if (el.statUnread) el.statUnread.textContent = unread;
+}
+async function renderCartasList() {
+  if (!el.cartasList) return;
+  var mine = cartasTab === 'out';
+  var items = getAllCartasMerged().filter(function(c) { return mine ? cartaIsMine(c) : cartaIsForMe(c); });
+  if (items.length === 0) {
+    el.cartasList.innerHTML = '<div class="carta-empty">' + (mine
+      ? 'Aún no enviaste ninguna carta 💌'
+      : 'No hay cartas pendientes… por ahora 💕') + '</div>';
+    return;
+  }
+  var resolved = await Promise.all(items.map(async function(c) {
+    var texto = cartaPlainMap[c.id] || (isEncryptedText(c.texto) ? await decryptText(c.texto) : (c.texto || ''));
+    return { c: c, texto: texto };
+  }));
+  el.cartasList.innerHTML = '';
+  resolved.forEach(function(it) {
+    var card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'carta-card' + ((!it.c.leida && cartaIsForMe(it.c)) ? ' unread' : '');
+    if (it.c._scheduled) card.classList.add('scheduled');
+    if (it.c.imagen) card.classList.add('has-image');
+    var env = document.createElement('span');
+    env.className = 'carta-env';
+    env.textContent = (it.c._pending ? '\uD83D\uDCF2' : (it.c._scheduled ? '\u23F0' : (cartaIsMine(it.c) ? '\uD83D\uDCE4' : (it.c.leida ? '\uD83D\uDCE9' : '\uD83D\uDC8C'))));
+    var body = document.createElement('span');
+    body.className = 'carta-body';
+    var top = document.createElement('span');
+    top.className = 'carta-top';
+    var who = document.createElement('span');
+    who.className = 'carta-from';
+    who.textContent = cartaIsMine(it.c) ? 'Para ' + (it.c.paraName || 'mi amor') : 'De ' + (it.c.deNombre || 'mi amor');
+    var date = document.createElement('span');
+    date.className = 'carta-date';
+    if (it.c._scheduled && it.c.scheduledForMs) {
+      var now = Date.now();
+      if (now < it.c.scheduledForMs) {
+        date.textContent = '\u23F0 ' + new Date(it.c.scheduledForMs).toLocaleDateString('es-ES') + ' ' + formatTime(it.c.scheduledForMs);
+        date.style.color = '#92400e';
+      } else {
+        date.textContent = timeAgo(it.c.createdAtMs || it.c.createdAt);
+      }
+    } else {
+      date.textContent = timeAgo(it.c.createdAtMs || it.c.createdAt);
+    }
+    var snip = document.createElement('span');
+    snip.className = 'carta-snippet';
+    var prefix = it.c._pending ? '\u23F3 ' : (it.c.imagen ? '\uD83D\uDDBC ' : '');
+    snip.textContent = prefix + (it.texto.substring(0, 70) || (it.c.imagen ? '(imagen)' : '(vacía)'));
+    var dot = document.createElement('span');
+    dot.className = 'carta-dot';
+    top.appendChild(who);
+    top.appendChild(date);
+    body.appendChild(top);
+    body.appendChild(snip);
+    card.appendChild(env);
+    card.appendChild(body);
+    card.appendChild(dot);
+    card.addEventListener('click', function() { openCartaReader(it.c); });
+    el.cartasList.appendChild(card);
+  });
+}
+function setCartasTab(tab) {
+  cartasTab = tab;
+  if (el.cartasTabIn) el.cartasTabIn.classList.toggle('active', tab === 'in');
+  if (el.cartasTabOut) el.cartasTabOut.classList.toggle('active', tab === 'out');
+  renderCartasList();
+}
+async function openCartaReader(c) {
+  currentCarta = c;
+  var texto = isEncryptedText(c.texto) ? await decryptText(c.texto) : (c.texto || '');
+  // Guarda: pudo llegar otro clic mientras desciframos
+  if (currentCarta !== c) return;
+  if (el.cartaReadFrom) el.cartaReadFrom.textContent = cartaIsMine(c) ? 'Para ' + (c.paraName || 'mi amor') : 'De ' + (c.deNombre || 'mi amor');
+  var ts = c.createdAtMs || c.createdAt || Date.now();
+  if (el.cartaReadDate) el.cartaReadDate.textContent = new Date(ts).toLocaleDateString('es-ES') + ' ' + formatTime(ts);
+  if (el.cartaReadText) el.cartaReadText.textContent = texto;
+  if (c.imagen && el.cartaReadImgWrap && el.cartaReadImg) {
+    el.cartaReadImg.src = c.imagen;
+    el.cartaReadImgWrap.classList.remove('hidden');
+  } else if (el.cartaReadImgWrap) {
+    el.cartaReadImgWrap.classList.add('hidden');
+  }
+  if (c._scheduled && c.scheduledForMs && el.cartaReadScheduleInfo && el.cartaReadScheduleText) {
+    el.cartaReadScheduleText.textContent = 'Programada para: ' + new Date(c.scheduledForMs).toLocaleDateString('es-ES') + ' ' + formatTime(c.scheduledForMs);
+    el.cartaReadScheduleInfo.classList.remove('hidden');
+  } else if (el.cartaReadScheduleInfo) {
+    el.cartaReadScheduleInfo.classList.add('hidden');
+  }
+  if (el.cartaReader) el.cartaReader.style.display = 'flex';
+  if (cartaIsForMe(c) && !c.leida) {
+    db.collection(CARTAS_COLLECTION).doc(c.id).update({
+      leida: true,
+      leidaAtMs: Date.now()
+    }).catch(function(){});
+  }
+}
+function sendCarta() {
+  var input = el.cartaInput;
+  var body = el.cartaBody;
+  if (!input || !currentUser) return;
+  var greeting = input.value.trim();
+  var bodyText = body ? body.value.trim() : '';
+  var text = greeting + (bodyText ? '\n\n' + bodyText : '');
+  text = text.trim();
+  if (!text && !cartaSelectedImage) { showError('Escribe algo bonito primero'); return; }
+  if (!text) text = '📷';
+  var partner = getPartnerConfig();
+  var mySlot = getAssignedUser();
+  var sealBtn = document.querySelector('.carta-compose-seal-btn.active');
+  var sealType = sealBtn ? sealBtn.getAttribute('data-seal') : 'favorite';
+  var btn = el.cartaSendBtn;
+  if (btn) btn.disabled = true;
+  function doSend(imageData) {
+    var encryptPromise = text === '📷' ? Promise.resolve('📷') : encryptText(text);
+    encryptPromise.then(function(cipher) {
+      var cartaId = generateClientId();
+      var data = {
+        texto: cipher,
+        deUid: currentUser.uid,
+        deSlot: mySlot || '',
+        deNombre: username || '',
+        paraUid: partnerRealUid || '',
+        paraSlot: mySlot === 'user1' ? 'user2' : 'user1',
+        paraName: (partnerProfile.username || (partner && partner.name) || 'Mi amor'),
+        leida: false,
+        sello: sealType,
+        createdAtMs: Date.now(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      if (imageData) data.imagen = imageData;
+      if (cartaScheduledDate) {
+        data.scheduledForMs = cartaScheduledDate.getTime();
+        data.scheduledFor = cartaScheduledDate.toISOString();
+        data._scheduled = true;
+      }
+      cartaPlainMap[cartaId] = text;
+      pendingCartas[cartaId] = Object.assign({}, data, { id: cartaId, _pending: true });
+      delete pendingCartas[cartaId].createdAt;
+      updateCartasBadges();
+      if (el.cartasModal && el.cartasModal.style.display === 'flex') renderCartasList();
+      hideCartasCompose();
+      setCartasTab('out');
+      input.value = '';
+      if (body) body.value = '';
+      if (el.cartaCounter) el.cartaCounter.textContent = '0/4000';
+      if (cartaScheduledDate) {
+        showSuccess('Carta programada para ' + new Date(cartaScheduledDate).toLocaleDateString('es-ES') + ' ' + formatTime(cartaScheduledDate.getTime()));
+      } else {
+        sendCartaToFirestoreOrQueue(data, cartaId);
+      }
+    }).catch(function(e) {
+      console.error('Carta error:', e);
+      showError('No se pudo enviar la carta');
+    }).then(function() { if (btn) btn.disabled = false; });
+  }
+  if (cartaSelectedImage) {
+    resizeImageForFirestore(cartaSelectedImage).then(function(dataUrl) { doSend(dataUrl); });
+  } else {
+    doSend(null);
+  }
+}
+function sendCartaToFirestoreOrQueue(data, cartaId) {
+  if (isOnline) {
+    db.collection(CARTAS_COLLECTION).doc(cartaId).set(data).then(function() {
+      showSuccess('Carta enviada \uD83D\uDC8C');
+    }).catch(function(err) {
+      console.error('Carta send error:', err);
+      addToCartasOfflineQueue(data, cartaId);
+      showError('Sin conexión: la carta se enviará al reconectar');
+    });
+  } else {
+    addToCartasOfflineQueue(data, cartaId);
+    showError('Sin conexión: la carta se enviará al reconectar');
+  }
+}
+
+/* Cola offline de cartas (misma lógica que mensajes) */
+var CARTAS_OFFLINE_KEY = 'chatpareja_cartas_offline';
+function getCartasOfflineQueue() { try { var d = localStorage.getItem(CARTAS_OFFLINE_KEY); return d ? JSON.parse(d) : []; } catch(e){ return []; } }
+function saveCartasOfflineQueue(q) { try { localStorage.setItem(CARTAS_OFFLINE_KEY, JSON.stringify(q)); } catch(e){} }
+function addToCartasOfflineQueue(data, cartaId) {
+  var q = getCartasOfflineQueue();
+  q.push({ cartaId: cartaId, data: data });
+  saveCartasOfflineQueue(q);
+}
+function flushCartasOfflineQueue() {
+  if (!isOnline || !currentUser) return;
+  var q = getCartasOfflineQueue();
+  if (!q.length) return;
+  var remaining = [];
+  q.forEach(function(item) {
+    db.collection(CARTAS_COLLECTION).doc(item.cartaId).set(item.data).catch(function(){
+      remaining.push(item);
+    });
+  });
+  saveCartasOfflineQueue(remaining);
+}
+function closeCartaReader() {
+  currentCarta = null;
+  if (el.cartaReader) el.cartaReader.style.display = 'none';
+}
+function checkScheduledCartas() {
+  if (!isOnline || !currentUser) return;
+  var now = Date.now();
+  cartasItems.forEach(function(c) {
+    if (c._scheduled && c.scheduledForMs && c.deUid === currentUser.uid && !c._sentScheduled) {
+      if (now >= c.scheduledForMs) {
+        c._sentScheduled = true;
+        db.collection(CARTAS_COLLECTION).doc(c.id).update({
+          _scheduled: false,
+          scheduledSentAtMs: now
+        }).catch(function(){});
+      }
+    }
+  });
+}
+setInterval(checkScheduledCartas, 60000);
+function hideCartasCompose() {
+  if (el.cartasCompose) el.cartasCompose.classList.add('hidden');
+  if (el.cartasNewBtn) el.cartasNewBtn.style.display = '';
+  if (el.cartaInput) el.cartaInput.value = '';
+  if (el.cartaBody) el.cartaBody.value = '';
+  if (el.cartaCounter) el.cartaCounter.textContent = '0/4000';
+  cartaSelectedImage = null;
+  cartaScheduledDate = null;
+  if (el.cartaImgPreview) el.cartaImgPreview.classList.add('hidden');
+  if (el.cartaImgThumb) el.cartaImgThumb.src = '';
+  if (el.cartaImgInput) el.cartaImgInput.value = '';
+  if (el.cartaSchedulePreview) el.cartaSchedulePreview.classList.add('hidden');
+  if (el.cartaSchedulePicker) el.cartaSchedulePicker.classList.add('hidden');
+  if (el.cartaScheduleDatetime) el.cartaScheduleDatetime.value = '';
+  if (el.cartaScheduleBtn) el.cartaScheduleBtn.classList.remove('active');
+  document.querySelectorAll('.carta-compose-seal-btn').forEach(function(b){ b.classList.remove('active'); });
+  var firstSeal = document.querySelector('.carta-compose-seal-btn[data-seal="favorite"]');
+  if (firstSeal) firstSeal.classList.add('active');
+}
+
+/* ============================================
+   MÁS (HUB)
+   ============================================ */
+function openMoreModal() {
+  updateCartasBadges();
+  updateMediaCount();
+  if (el.moreModal) el.moreModal.style.display = 'flex';
+}
+function closeMoreModal() {
+  if (el.moreModal) el.moreModal.style.display = 'none';
+}
+function openMediaGallery() {
+  if (!el.mediaGalleryModal || !el.mediaGalleryGrid) return;
+  el.mediaGalleryGrid.innerHTML = '';
+  var images = allMessages.filter(function(m) { return m.imageBase64; });
+  if (!images.length) {
+    el.mediaGalleryGrid.innerHTML = '<p style="text-align:center;padding:40px;color:#999;grid-column:1/-1">No hay imágenes en el chat</p>';
+    el.mediaGalleryModal.style.display = 'flex';
+    return;
+  }
+  images.reverse().forEach(function(m) {
+    var card = document.createElement('div');
+    card.className = 'media-card';
+    var img = document.createElement('img');
+    img.src = m.imageBase64;
+    img.loading = 'lazy';
+    img.className = 'media-thumb';
+    var time = document.createElement('span');
+    time.className = 'media-time';
+    var ts = m.timestamp || m.createdAtMs || 0;
+    time.textContent = ts ? new Date(ts).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : '';
+    card.appendChild(img);
+    card.appendChild(time);
+    card.addEventListener('click', function() {
+      var imgs = images.map(function(m) { return m.imageBase64; });
+      var idx = imgs.indexOf(m.imageBase64);
+      openLightbox(m.imageBase64, imgs, idx >= 0 ? idx : 0);
+    });
+    el.mediaGalleryGrid.appendChild(card);
+  });
+  el.mediaGalleryModal.style.display = 'flex';
+}
+function closeMediaGallery() {
+  if (el.mediaGalleryModal) el.mediaGalleryModal.style.display = 'none';
+}
+function updateMediaCount() {
+  var count = allMessages.filter(function(m) { return m.imageBase64; }).length;
+  if (el.mediaCount) el.mediaCount.textContent = count > 0 ? count : '';
+}
+function openCartasModal() {
+  if (el.cartasModal) el.cartasModal.style.display = 'flex';
+  setCartasTab(cartasTab);
+}
+function closeCartasModal() {
+  hideCartasCompose();
+  if (el.cartasModal) el.cartasModal.style.display = 'none';
+}
+
 /* DRAG & DROP */
 function handleDragOver(e) { e.preventDefault(); var o = document.getElementById('drag-drop-overlay'); if (o) o.style.display = 'flex'; }
 function handleDragLeave() { var o = document.getElementById('drag-drop-overlay'); if (o) o.style.display = 'none'; }
@@ -1714,338 +2394,6 @@ function handleDrop(e) {
   if (files.length > 0) { var imgs = Array.from(files).filter(function(f){ return f.type.startsWith('image/'); }); if (imgs.length > 0) showImagePreviewModal(imgs); }
 }
 
-
-/* ============================================
-   DOMContentLoaded - ALL EVENT LISTENERS
-   ============================================ */
-document.addEventListener('DOMContentLoaded', function() {
-  el = {
-    messagesContainer: document.getElementById('messages-container'),
-    welcomeMessage: document.getElementById('welcome-message'),
-    chatForm: document.getElementById('chat-form'),
-    messageInput: document.getElementById('message-input'),
-    sendBtn: document.getElementById('send-btn'),
-    emojiBtn: document.getElementById('emoji-btn'),
-    emojiPicker: document.getElementById('emoji-picker'),
-    imageBtn: document.getElementById('image-btn'),
-    imageInputCamera: document.getElementById('image-input-camera'),
-    imageInputGallery: document.getElementById('image-input-gallery'),
-    imageOptionsModal: document.getElementById('image-options-modal'),
-    imagePreviewModal: document.getElementById('image-preview-modal'),
-    imagePreviewContainer: document.getElementById('image-preview-container'),
-    imageCaptionInput: document.getElementById('image-caption-input'),
-    userBadge: document.getElementById('user-badge'),
-    pendingIndicator: document.getElementById('pending-indicator'),
-    voiceBtn: document.getElementById('voice-btn'),
-    voiceIndicator: document.getElementById('voice-recording-indicator'),
-    voiceRecTime: document.getElementById('voice-rec-time'),
-    pinnedBtn: document.getElementById('pinned-btn'),
-    pinnedBanner: document.getElementById('pinned-banner'),
-    pinnedMain: document.getElementById('pinned-main'),
-    pinnedPreview: document.getElementById('pinned-preview'),
-    pinnedCounter: document.getElementById('pinned-counter'),
-    pinnedPrevBtn: document.getElementById('pinned-prev-btn'),
-    pinnedNextBtn: document.getElementById('pinned-next-btn'),
-    pinnedUnpinBtn: document.getElementById('pinned-unpin-btn'),
-    pinnedList: document.getElementById('pinned-list'),
-    pinnedCloseBtn: document.getElementById('pinned-close-btn'),
-    settingsBtn: document.getElementById('settings-btn'),
-    settingsModal: document.getElementById('settings-modal'),
-    settingsCloseBtn: document.getElementById('settings-close-btn'),
-    refreshBtn: document.getElementById('refresh-btn'),
-    editModal: document.getElementById('edit-modal'),
-    editInput: document.getElementById('edit-input'),
-    editCancelBtn: document.getElementById('edit-cancel-btn'),
-    editSaveBtn: document.getElementById('edit-save-btn'),
-    searchToggleBtn: document.getElementById('search-toggle-btn'),
-    searchBar: document.getElementById('search-bar'),
-    searchInput: document.getElementById('search-input'),
-    searchCloseBtn: document.getElementById('search-close-btn'),
-    replyPreview: document.getElementById('reply-preview'),
-    offlineBanner: document.getElementById('offline-banner'),
-    scrollToBottomBtn: document.getElementById('scroll-to-bottom-btn'),
-    reactionPicker: document.getElementById('reaction-picker'),
-    reactionPickerContent: document.querySelector('#reaction-picker .reaction-picker-content'),
-    chatInputArea: document.querySelector('.chat-input-area'),
-    loginScreen: document.getElementById('login-screen'),
-    loginForm: document.getElementById('login-form'),
-    loginPassword: document.getElementById('login-password'),
-    loginError: document.getElementById('login-error'),
-    loginSubmitBtn: document.getElementById('login-submit-btn'),
-    chatContainer: document.getElementById('chat-container'),
-    logoutBtn: document.getElementById('logout-btn'),
-    profileAvatar: document.getElementById('profile-avatar'),
-    profileAvatarInput: document.getElementById('profile-avatar-input'),
-    profileNameInput: document.getElementById('profile-name-input'),
-    profileBioInput: document.getElementById('profile-bio-input'),
-    profileSaveBtn: document.getElementById('profile-save-btn'),
-    profileCancelBtn: document.getElementById('profile-cancel-btn'),
-    partnerProfileAvatar: document.getElementById('partner-profile-avatar'),
-    partnerProfileName: document.getElementById('partner-profile-name'),
-    partnerProfileBio: document.getElementById('partner-profile-bio'),
-    headerPartnerImg: document.getElementById('header-partner-img'),
-    headerPartnerInitial: document.getElementById('header-partner-initial'),
-    themeSelect: document.getElementById('theme-select'),
-    myDestacadosBtn: document.getElementById('my-destacados-btn'),
-    partnerDestacadosBtn: document.getElementById('partner-destacados-btn'),
-    destacadosModal: document.getElementById('destacados-modal'),
-    destacadosCloseBtn: document.getElementById('destacados-close-btn'),
-    destacadosList: document.getElementById('destacados-list'),
-    destacadosCount: document.getElementById('destacados-count'),
-    partnerDestacadosStatus: document.getElementById('partner-destacados-status'),
-    shareDestacadosToggle: document.getElementById('share-destacados-toggle'),
-    statTotal: document.getElementById('stat-total'),
-    statMine: document.getElementById('stat-mine'),
-    statPartner: document.getElementById('stat-partner'),
-    statImages: document.getElementById('stat-images'),
-    statAudios: document.getElementById('stat-audios'),
-    optionCamera: document.getElementById('option-camera'),
-    optionGallery: document.getElementById('option-gallery'),
-    imageOptionsCancel: document.getElementById('image-options-cancel'),
-    previewCloseBtn: document.getElementById('preview-close-btn'),
-    previewCancelBtn: document.getElementById('preview-cancel-btn'),
-    previewSendBtn: document.getElementById('preview-send-btn'),
-    gifBtn: document.getElementById('gif-btn'),
-    anniversaryChip: document.getElementById('anniversary-chip'),
-    anniversaryInput: document.getElementById('anniversary-input'),
-    anniversarySaveBtn: document.getElementById('anniversary-save-btn'),
-    wishlistBtn: document.getElementById('wishlist-btn'),
-    wishlistModal: document.getElementById('wishlist-modal'),
-    wishlistCloseBtn: document.getElementById('wishlist-close-btn'),
-    wishlistInput: document.getElementById('wishlist-input'),
-    wishlistAddBtn: document.getElementById('wishlist-add-btn'),
-    wishlistList: document.getElementById('wishlist-list'),
-    wishlistCount: document.getElementById('wishlist-count'),
-    e2eeSaveBtn: document.getElementById('e2ee-save-btn'),
-    e2eeDisableBtn: document.getElementById('e2ee-disable-btn'),
-    exportTxtBtn: document.getElementById('export-txt-btn'),
-    exportPdfBtn: document.getElementById('export-pdf-btn')
-  };
-
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  initTheme();
-
-  /* STATIC ICONS */
-  renderIcon(document.querySelector('.welcome-icon'), 'messageCircle');
-  renderIcon(document.querySelector('.drag-drop-icon'), 'upload');
-  renderIcon(document.querySelector('.scroll-icon'), 'arrowDown');
-  renderIcon(el.imageBtn && el.imageBtn.querySelector('.btn-media-inner'), 'image');
-  renderIcon(el.pinnedBtn && el.pinnedBtn.querySelector('.btn-icon-inner'), 'pin');
-  renderIcon(el.searchToggleBtn && el.searchToggleBtn.querySelector('.btn-icon-inner'), 'search');
-  renderIcon(el.settingsBtn && el.settingsBtn.querySelector('.btn-icon-inner'), 'settings');
-  renderIcon(el.refreshBtn && el.refreshBtn.querySelector('.btn-icon-inner'), 'sync');
-  renderIcon(el.settingsCloseBtn && el.settingsCloseBtn.querySelector('.btn-icon'), 'close');
-  renderIcon(el.emojiBtn && el.emojiBtn.querySelector('.btn-emoji-inner'), 'emoji');
-  renderIcon(el.voiceBtn && el.voiceBtn.querySelector('.btn-voice-inner'), 'mic');
-  renderIcon(el.sendBtn && el.sendBtn.querySelector('.btn-send-inner'), 'send');
-  renderIcon(el.pinnedCloseBtn && el.pinnedCloseBtn.querySelector('span'), 'close');
-  renderIcon(el.searchCloseBtn && el.searchCloseBtn.querySelector('span'), 'close');
-  var rpi = el.replyPreview && el.replyPreview.querySelector('.reply-preview-close span');
-  if (rpi) renderIcon(rpi, 'close');
-
-  /* LOGIN */
-  if (el.loginForm) el.loginForm.addEventListener('submit', function(e) {
-    e.preventDefault();
-    var pw = el.loginPassword ? el.loginPassword.value.trim() : '';
-    if (!pw) { if (el.loginError) { el.loginError.textContent = 'Ingresa la clave'; el.loginError.style.display = 'block'; } return; }
-    if (el.loginError) el.loginError.style.display = 'none';
-    if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = true; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrando...'; }
-    tryLoginWithPassword(pw).catch(function(err) {
-      console.error('Login error:', err);
-      if (el.loginError) { el.loginError.textContent = 'Clave incorrecta'; el.loginError.style.display = 'block'; }
-      if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
-      if (el.loginPassword) el.loginPassword.value = '';
-    });
-  });
-
-  auth.onAuthStateChanged(function(user) { checkUserAccess(user); });
-  tryAutoLogin();
-
-  /* CHAT FORM */
-  if (el.chatForm) el.chatForm.addEventListener('submit', function(e) {
-    e.preventDefault();
-    var text = el.messageInput ? el.messageInput.value.trim() : '';
-    if (!text || !currentUser) return;
-    el.messageInput.value = '';
-    sendMessage(text, null, null);
-  });
-  if (el.sendBtn) el.sendBtn.addEventListener('click', function(e) { e.preventDefault(); if (el.chatForm) el.chatForm.requestSubmit(); });
-  if (el.messageInput) el.messageInput.addEventListener('input', handleTypingInput);
-
-  /* IMAGES */
-  if (el.imageBtn) el.imageBtn.addEventListener('click', showImageOptionsModal);
-  if (el.optionCamera) el.optionCamera.addEventListener('click', function() { hideImageOptionsModal(); if (el.imageInputCamera) el.imageInputCamera.click(); });
-  if (el.optionGallery) el.optionGallery.addEventListener('click', function() { hideImageOptionsModal(); if (el.imageInputGallery) el.imageInputGallery.click(); });
-  if (el.imageOptionsCancel) el.imageOptionsCancel.addEventListener('click', hideImageOptionsModal);
-  if (el.imageInputCamera) el.imageInputCamera.addEventListener('change', function(e) { if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
-  if (el.imageInputGallery) el.imageInputGallery.addEventListener('change', function(e) { if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
-  if (el.previewSendBtn) el.previewSendBtn.addEventListener('click', sendPendingImages);
-  if (el.previewCancelBtn) el.previewCancelBtn.addEventListener('click', hideImagePreviewModal);
-  if (el.previewCloseBtn) el.previewCloseBtn.addEventListener('click', hideImagePreviewModal);
-
-  /* VOICE */
-  var voiceTimer = null;
-  if (el.voiceBtn) {
-    el.voiceBtn.addEventListener('mousedown', function() { voiceTimer = setTimeout(startVoiceRecording, 300); });
-    el.voiceBtn.addEventListener('mouseup', function() { clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
-    el.voiceBtn.addEventListener('mouseleave', function() { clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
-    el.voiceBtn.addEventListener('touchstart', function(e) { e.preventDefault(); voiceTimer = setTimeout(startVoiceRecording, 300); }, { passive: false });
-    el.voiceBtn.addEventListener('touchend', function(e) { e.preventDefault(); clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
-  }
-  var vrc = document.getElementById('voice-rec-cancel-btn');
-  if (vrc) vrc.addEventListener('click', cancelVoiceRecording);
-
-  /* EMOJI */
-  if (el.emojiBtn) el.emojiBtn.addEventListener('click', toggleEmojiPicker);
-
-  /* GIFS */
-  if (el.gifBtn) el.gifBtn.addEventListener('click', toggleGifPicker);
-
-  /* ANNIVERSARY */
-  if (el.anniversarySaveBtn) el.anniversarySaveBtn.addEventListener('click', function() {
-    var val = el.anniversaryInput ? el.anniversaryInput.value : '';
-    if (!val || !/^\d{4}-\d{2}-\d{2}$/.test(val)) { showError('Elegí una fecha válida'); return; }
-    db.collection('rooms').doc(ROOM_ID).set({ anniversary: val }, { merge: true }).then(function() {
-      showSuccess('Aniversario guardado');
-    }).catch(function(){ showError('No se pudo guardar'); });
-  });
-
-  /* WISHLIST */
-  function openWishlistModal() {
-    if (!el.wishlistModal) return;
-    enterSubPanel(el.wishlistModal);
-    renderWishlistList();
-    setTimeout(function() { if (el.wishlistInput) el.wishlistInput.focus(); }, 150);
-  }
-  if (el.wishlistBtn) el.wishlistBtn.addEventListener('click', openWishlistModal);
-  if (el.wishlistCloseBtn) el.wishlistCloseBtn.addEventListener('click', function(){ hideWishlistModal(); });
-  if (el.wishlistModal) el.wishlistModal.addEventListener('click', function(e) { if (e.target === el.wishlistModal) hideWishlistModal(); });
-  if (el.wishlistAddBtn) el.wishlistAddBtn.addEventListener('click', addWishlistItem);
-  if (el.wishlistInput) el.wishlistInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') { e.preventDefault(); addWishlistItem(); }
-  });
-
-  /* E2EE */
-  if (el.e2eeSaveBtn) el.e2eeSaveBtn.addEventListener('click', function() {
-    var input = document.getElementById('e2ee-pass-input');
-    if (input) saveE2eePass(input.value);
-  });
-  if (el.e2eeDisableBtn) el.e2eeDisableBtn.addEventListener('click', function() {
-    showConfirm('¿Desactivar el cifrado en este dispositivo? Los mensajes cifrados se verán como [🔒 Sin clave] hasta que actives la frase de nuevo.').then(function(ok) {
-      if (ok) disableE2eeLocal();
-    });
-  });
-
-  /* EXPORT */
-  if (el.exportTxtBtn) el.exportTxtBtn.addEventListener('click', exportChatTxt);
-  if (el.exportPdfBtn) el.exportPdfBtn.addEventListener('click', exportChatPdf);
-
-  /* SEARCH */
-  if (el.searchToggleBtn) el.searchToggleBtn.addEventListener('click', toggleSearch);
-  if (el.searchInput) el.searchInput.addEventListener('input', function(e) { filterMessages(e.target.value); });
-  if (el.searchCloseBtn) el.searchCloseBtn.addEventListener('click', toggleSearch);
-  var searchPrevBtn = document.getElementById('search-prev-btn');
-  var searchNextBtn = document.getElementById('search-next-btn');
-  if (searchPrevBtn) { searchPrevBtn.textContent = '\u25C0'; searchPrevBtn.addEventListener('click', searchPrev); }
-  if (searchNextBtn) { searchNextBtn.textContent = '\u25B6'; searchNextBtn.addEventListener('click', searchNext); }
-  if (el.searchInput) el.searchInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) searchPrev(); else searchNext(); }
-  });
-
-  /* REPLY PREVIEW */
-  if (el.replyPreview) { var rpx = el.replyPreview.querySelector('.reply-preview-close'); if (rpx) rpx.addEventListener('click', clearReplyPreview); }
-
-  /* EDIT MODAL */
-  if (el.editCancelBtn) el.editCancelBtn.addEventListener('click', closeEditModal);
-  if (el.editSaveBtn) el.editSaveBtn.addEventListener('click', saveEdit);
-  if (el.editModal) el.editModal.addEventListener('click', function(e) { if (e.target === el.editModal) closeEditModal(); });
-
-  /* PINNED */
-  if (el.pinnedBtn) el.pinnedBtn.addEventListener('click', function() {
-    if (pinnedMessages.length > 0) {
-      pinnedDismissedSig = null;
-      try { sessionStorage.removeItem(PINNED_DISMISS_KEY); } catch(err){}
-      renderPinnedBanner();
-      scrollToMessage(currentPin().id);
-    } else if (el.pinnedBanner) setPinnedBannerVisible(false);
-  });
-  if (el.pinnedMain) el.pinnedMain.addEventListener('click', function() {
-    var pin = currentPin();
-    if (pin) scrollToMessage(pin.id);
-  });
-  if (el.pinnedMain) el.pinnedMain.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); var pin = currentPin(); if (pin) scrollToMessage(pin.id); }
-  });
-  if (el.pinnedPrevBtn) el.pinnedPrevBtn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    if (pinnedMessages.length < 2) return;
-    pinnedIndex = (pinnedIndex - 1 + pinnedMessages.length) % pinnedMessages.length;
-    renderPinnedBanner();
-  });
-  if (el.pinnedNextBtn) el.pinnedNextBtn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    if (pinnedMessages.length < 2) return;
-    pinnedIndex = (pinnedIndex + 1) % pinnedMessages.length;
-    renderPinnedBanner();
-  });
-  if (el.pinnedUnpinBtn) el.pinnedUnpinBtn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    var pin = currentPin();
-    if (pin) unpinMessage(pin.id);
-  });
-  if (el.pinnedCloseBtn) el.pinnedCloseBtn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    pinnedDismissedSig = pinnedSignature();
-    try { sessionStorage.setItem(PINNED_DISMISS_KEY, pinnedDismissedSig); } catch(err){}
-    setPinnedBannerVisible(false);
-  });
-
-  /* SETTINGS */
-  if (el.settingsBtn) el.settingsBtn.addEventListener('click', openSettingsModal);
-  if (el.settingsCloseBtn) el.settingsCloseBtn.addEventListener('click', closeSettingsModal);
-  if (el.settingsModal) el.settingsModal.addEventListener('click', function(e) { if (e.target === el.settingsModal) closeSettingsModal(); });
-  if (el.refreshBtn) el.refreshBtn.addEventListener('click', softRefresh);
-  if (el.logoutBtn) el.logoutBtn.addEventListener('click', function() { cleanupListeners(); auth.signOut().then(function() { showLoginScreen(); }); });
-
-  /* PROFILE */
-  if (el.profileSaveBtn) el.profileSaveBtn.addEventListener('click', saveProfile);
-  if (el.profileCancelBtn) el.profileCancelBtn.addEventListener('click', updateMyProfileUI);
-  if (el.profileAvatar) el.profileAvatar.addEventListener('click', function() { if (el.profileAvatarInput) el.profileAvatarInput.click(); });
-  if (el.profileAvatarInput) el.profileAvatarInput.addEventListener('change', function(e) {
-    var file = e.target.files[0]; if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function(ev) { myProfile.avatarBase64 = ev.target.result; updateMyProfileUI(); };
-    reader.readAsDataURL(file);
-  });
-
-  /* DESTACADOS */
-  if (el.myDestacadosBtn) el.myDestacadosBtn.addEventListener('click', function() { showDestacadosModal('my'); });
-  if (el.partnerDestacadosBtn) el.partnerDestacadosBtn.addEventListener('click', function() { showDestacadosModal('partner'); });
-  if (el.destacadosCloseBtn) el.destacadosCloseBtn.addEventListener('click', hideDestacadosModal);
-  if (el.destacadosModal) el.destacadosModal.addEventListener('click', function(e) { if (e.target === el.destacadosModal) hideDestacadosModal(); });
-  if (el.shareDestacadosToggle) el.shareDestacadosToggle.addEventListener('change', toggleShareDestacados);
-
-  /* SCROLL */
-  var loadingOlder = false;
-  function loadOlderMessages() {
-    if (loadingOlder || allMessages.length <= visibleCount) return;
-    loadingOlder = true;
-    var sc = el.messagesContainer;
-    var prevHeight = sc.scrollHeight, prevTop = sc.scrollTop;
-    visibleCount += 30;
-    renderMessagesList();
-    requestAnimationFrame(function() {
-      sc.scrollTop = sc.scrollHeight - prevHeight + prevTop;
-      loadingOlder = false;
-    });
-  }
-  if (el.scrollToBottomBtn) el.scrollToBottomBtn.addEventListener('click', scrollToBottom);
-  if (el.messagesContainer) el.messagesContainer.addEventListener('scroll', function() {
-    if (isUserAtBottom()) { unreadCount = 0; updateScrollButton(); }
-    if (el.messagesContainer.scrollTop < 80 && allMessages.length > visibleCount && !loadingOlder && firstSnapshotReceived) {
-      loadOlderMessages();
-    }
-  });
 
 /* ============================================
    WISHLIST / BUCKET LIST COMPARTIDA
@@ -2229,15 +2577,27 @@ function getGiphyKey() {
 function toggleGifPicker() {
   if (!getGiphyKey()) { showError('Configura tu API key gratuita de GIPHY en Ajustes'); return; }
   if (gifPickerOverlay) { gifPickerOverlay.remove(); gifPickerOverlay = null; return; }
+  var pickerMode = 'gifs';
   gifPickerOverlay = document.createElement('div');
   gifPickerOverlay.className = 'gif-picker-overlay';
   var panel = document.createElement('div');
   panel.className = 'gif-picker-panel';
   var head = document.createElement('div');
   head.className = 'gif-picker-head';
-  var title = document.createElement('span');
-  title.className = 'gif-picker-title';
-  title.textContent = 'GIFs';
+  var toggleRow = document.createElement('div');
+  toggleRow.className = 'gif-picker-toggle';
+  var btnGifs = document.createElement('button');
+  btnGifs.type = 'button';
+  btnGifs.className = 'gif-toggle-btn active';
+  btnGifs.textContent = 'GIFs';
+  var btnStickers = document.createElement('button');
+  btnStickers.type = 'button';
+  btnStickers.className = 'gif-toggle-btn';
+  btnStickers.textContent = 'Stickers';
+  toggleRow.appendChild(btnGifs);
+  toggleRow.appendChild(btnStickers);
+  var searchRow = document.createElement('div');
+  searchRow.className = 'gif-picker-search-row';
   var search = document.createElement('input');
   search.type = 'search';
   search.placeholder = 'Buscar GIFs...';
@@ -2246,15 +2606,16 @@ function toggleGifPicker() {
   search.setAttribute('autocorrect', 'off');
   search.setAttribute('autocapitalize', 'off');
   search.setAttribute('spellcheck', 'false');
-  search.setAttribute('aria-label', 'Buscar GIFs');
+  search.setAttribute('aria-label', 'Buscar GIFs o Stickers');
   var closeBtn = document.createElement('button');
   closeBtn.type = 'button';
-  closeBtn.className = 'btn-icon';
+  closeBtn.className = 'btn-icon gif-picker-close';
   closeBtn.innerHTML = '\u2715';
-  closeBtn.setAttribute('aria-label', 'Cerrar GIFs');
-  head.appendChild(title);
-  head.appendChild(search);
-  head.appendChild(closeBtn);
+  closeBtn.setAttribute('aria-label', 'Cerrar');
+  searchRow.appendChild(search);
+  searchRow.appendChild(closeBtn);
+  head.appendChild(toggleRow);
+  head.appendChild(searchRow);
   var grid = document.createElement('div');
   grid.className = 'gif-picker-grid';
   var hint = document.createElement('div');
@@ -2266,6 +2627,17 @@ function toggleGifPicker() {
   gifPickerOverlay.appendChild(panel);
   document.body.appendChild(gifPickerOverlay);
 
+  function setMode(mode) {
+    pickerMode = mode;
+    btnGifs.classList.toggle('active', mode === 'gifs');
+    btnStickers.classList.toggle('active', mode === 'stickers');
+    search.placeholder = mode === 'gifs' ? 'Buscar GIFs...' : 'Buscar Stickers...';
+    hint.textContent = mode === 'gifs' ? 'Toca un GIF para enviarlo' : 'Toca un sticker para enviarlo';
+    loadFeed(search.value.trim());
+  }
+  btnGifs.addEventListener('click', function() { setMode('gifs'); });
+  btnStickers.addEventListener('click', function() { setMode('stickers'); });
+
   function loadFeed(q) {
     grid.innerHTML = '';
     for (var s = 0; s < 9; s++) {
@@ -2274,21 +2646,23 @@ function toggleGifPicker() {
       grid.appendChild(skel);
     }
     var key = getGiphyKey();
+    var type = pickerMode === 'stickers' ? 'stickers' : 'gifs';
     var url = q
-      ? 'https://api.giphy.com/v1/gifs/search?api_key=' + encodeURIComponent(key) + '&q=' + encodeURIComponent(q) + '&limit=24&rating=pg-13'
-      : 'https://api.giphy.com/v1/gifs/trending?api_key=' + encodeURIComponent(key) + '&limit=24&rating=pg-13';
+      ? 'https://api.giphy.com/v1/' + type + '/search?api_key=' + encodeURIComponent(key) + '&q=' + encodeURIComponent(q) + '&limit=24&rating=pg-13'
+      : 'https://api.giphy.com/v1/' + type + '/trending?api_key=' + encodeURIComponent(key) + '&limit=24&rating=pg-13';
     fetch(url).then(function(r) { return r.json(); }).then(function(json) {
       grid.innerHTML = '';
       if (!json.data || !json.data.length) {
-        grid.innerHTML = '<div class="gif-msg">' + (q ? 'Sin resultados para "' + escapeHtml(q) + '"' : 'No hay GIFs por ahora') + '</div>';
+        var label = pickerMode === 'stickers' ? 'stickers' : 'GIFs';
+        grid.innerHTML = '<div class="gif-msg">' + (q ? 'Sin resultados para "' + escapeHtml(q) + '"' : 'No hay ' + label + ' por ahora') + '</div>';
         return;
       }
       json.data.forEach(function(g) {
         var img = document.createElement('img');
         img.src = g.images.fixed_width.url;
-        img.alt = (g.title || 'GIF');
+        img.alt = (g.title || (pickerMode === 'stickers' ? 'Sticker' : 'GIF'));
         img.loading = 'lazy';
-        img.className = 'gif-thumb';
+        img.className = 'gif-thumb' + (pickerMode === 'stickers' ? ' sticker-thumb' : '');
         img.addEventListener('click', function() {
           sendGifMessage(g.images.original.url, g.images.original.width, g.images.original.height);
           closeGifPicker();
@@ -2318,6 +2692,526 @@ function closeGifPicker() {
 function sendGifMessage(url, w, h) {
   sendMessage('', { gifUrl: true, url: url, w: parseInt(w, 10) || 0, h: parseInt(h, 10) || 0 }, null);
 }
+/* ============================================
+   DOMContentLoaded - ALL EVENT LISTENERS
+   ============================================ */
+document.addEventListener('DOMContentLoaded', function() {
+  el = {
+    messagesContainer: document.getElementById('messages-container'),
+    welcomeMessage: document.getElementById('welcome-message'),
+    chatForm: document.getElementById('chat-form'),
+    messageInput: document.getElementById('message-input'),
+    sendBtn: document.getElementById('send-btn'),
+    emojiBtn: document.getElementById('emoji-btn'),
+    emojiPicker: document.getElementById('emoji-picker'),
+    imageBtn: document.getElementById('image-btn'),
+    imageInputCamera: document.getElementById('image-input-camera'),
+    imageInputGallery: document.getElementById('image-input-gallery'),
+    imageOptionsModal: document.getElementById('image-options-modal'),
+    imagePreviewModal: document.getElementById('image-preview-modal'),
+    imagePreviewContainer: document.getElementById('image-preview-container'),
+    imageCaptionInput: document.getElementById('image-caption-input'),
+    userBadge: document.getElementById('user-badge'),
+    pendingIndicator: document.getElementById('pending-indicator'),
+    voiceBtn: document.getElementById('voice-btn'),
+    voiceIndicator: document.getElementById('voice-recording-indicator'),
+    voiceRecTime: document.getElementById('voice-rec-time'),
+    pinnedBtn: document.getElementById('pinned-btn'),
+    pinnedBanner: document.getElementById('pinned-banner'),
+    pinnedMain: document.getElementById('pinned-main'),
+    pinnedPreview: document.getElementById('pinned-preview'),
+    pinnedCounter: document.getElementById('pinned-counter'),
+    pinnedPrevBtn: document.getElementById('pinned-prev-btn'),
+    pinnedNextBtn: document.getElementById('pinned-next-btn'),
+    pinnedUnpinBtn: document.getElementById('pinned-unpin-btn'),
+    pinnedList: document.getElementById('pinned-list'),
+    pinnedCloseBtn: document.getElementById('pinned-close-btn'),
+    settingsBtn: document.getElementById('settings-btn'),
+    settingsModal: document.getElementById('settings-modal'),
+    settingsCloseBtn: document.getElementById('settings-close-btn'),
+    refreshBtn: document.getElementById('refresh-btn'),
+    editModal: document.getElementById('edit-modal'),
+    editInput: document.getElementById('edit-input'),
+    editCancelBtn: document.getElementById('edit-cancel-btn'),
+    editSaveBtn: document.getElementById('edit-save-btn'),
+    searchToggleBtn: document.getElementById('search-toggle-btn'),
+    searchBar: document.getElementById('search-bar'),
+    searchInput: document.getElementById('search-input'),
+    searchCloseBtn: document.getElementById('search-close-btn'),
+    replyPreview: document.getElementById('reply-preview'),
+    offlineBanner: document.getElementById('offline-banner'),
+    scrollToBottomBtn: document.getElementById('scroll-to-bottom-btn'),
+    reactionPicker: document.getElementById('reaction-picker'),
+    reactionPickerContent: document.querySelector('#reaction-picker .reaction-picker-content'),
+    chatInputArea: document.querySelector('.chat-input-area'),
+    loginScreen: document.getElementById('login-screen'),
+    loginForm: document.getElementById('login-form'),
+    loginPassword: document.getElementById('login-password'),
+    loginError: document.getElementById('login-error'),
+    loginSubmitBtn: document.getElementById('login-submit-btn'),
+    chatContainer: document.getElementById('chat-container'),
+    logoutBtn: document.getElementById('logout-btn'),
+    profileAvatar: document.getElementById('profile-avatar'),
+    profileAvatarInput: document.getElementById('profile-avatar-input'),
+    profileNameInput: document.getElementById('profile-name-input'),
+    profileBioInput: document.getElementById('profile-bio-input'),
+    profileSaveBtn: document.getElementById('profile-save-btn'),
+    profileCancelBtn: document.getElementById('profile-cancel-btn'),
+    partnerProfileAvatar: document.getElementById('partner-profile-avatar'),
+    avatarLightbox: document.getElementById('avatar-lightbox'),
+    avatarLightboxImg: document.getElementById('avatar-lightbox-img'),
+    avatarLightboxClose: document.getElementById('avatar-lightbox-close'),
+    partnerProfileName: document.getElementById('partner-profile-name'),
+    partnerProfileBio: document.getElementById('partner-profile-bio'),
+    headerPartnerAvatar: document.getElementById('header-partner-avatar'),
+    headerPartnerImg: document.getElementById('header-partner-img'),
+    headerPartnerBio: document.getElementById('header-partner-bio'),
+    headerPartnerInitial: document.getElementById('header-partner-initial'),
+    themeSelect: document.getElementById('theme-select'),
+    myDestacadosBtn: document.getElementById('my-destacados-btn'),
+    partnerDestacadosBtn: document.getElementById('partner-destacados-btn'),
+    destacadosModal: document.getElementById('destacados-modal'),
+    destacadosCloseBtn: document.getElementById('destacados-close-btn'),
+    destacadosList: document.getElementById('destacados-list'),
+    destacadosCount: document.getElementById('destacados-count'),
+    partnerDestacadosStatus: document.getElementById('partner-destacados-status'),
+    shareDestacadosToggle: document.getElementById('share-destacados-toggle'),
+    statTotal: document.getElementById('stat-total'),
+    statMine: document.getElementById('stat-mine'),
+    statPartner: document.getElementById('stat-partner'),
+    statImages: document.getElementById('stat-images'),
+    statAudios: document.getElementById('stat-audios'),
+    optionCamera: document.getElementById('option-camera'),
+    optionGallery: document.getElementById('option-gallery'),
+    imageOptionsCancel: document.getElementById('image-options-cancel'),
+    previewCloseBtn: document.getElementById('preview-close-btn'),
+    previewCancelBtn: document.getElementById('preview-cancel-btn'),
+    previewSendBtn: document.getElementById('preview-send-btn'),
+    previewViewOnceBtn: document.getElementById('preview-viewonce-btn'),
+    gifBtn: document.getElementById('gif-btn'),
+    anniversaryChip: document.getElementById('anniversary-chip'),
+    anniversaryInput: document.getElementById('anniversary-input'),
+    anniversarySaveBtn: document.getElementById('anniversary-save-btn'),
+    wishlistBtn: document.getElementById('wishlist-btn'),
+    wishlistModal: document.getElementById('wishlist-modal'),
+    wishlistCloseBtn: document.getElementById('wishlist-close-btn'),
+    wishlistInput: document.getElementById('wishlist-input'),
+    wishlistAddBtn: document.getElementById('wishlist-add-btn'),
+    wishlistList: document.getElementById('wishlist-list'),
+    wishlistCount: document.getElementById('wishlist-count'),
+    e2eeSaveBtn: document.getElementById('e2ee-save-btn'),
+    e2eeDisableBtn: document.getElementById('e2ee-disable-btn'),
+    exportTxtBtn: document.getElementById('export-txt-btn'),
+    exportPdfBtn: document.getElementById('export-pdf-btn'),
+    moreBtn: document.getElementById('more-btn'),
+    moreBadge: document.getElementById('more-badge'),
+    moreModal: document.getElementById('more-modal'),
+    moreCloseBtn: document.getElementById('more-close-btn'),
+    mediaGalleryBtn: document.getElementById('media-gallery-btn'),
+    mediaGalleryModal: document.getElementById('media-gallery-modal'),
+    mediaGalleryClose: document.getElementById('media-gallery-close'),
+    mediaGalleryGrid: document.getElementById('media-gallery-grid'),
+    mediaCount: document.getElementById('media-count'),
+    cartasRow: document.getElementById('cartas-row'),
+    cartasUnreadBadge: document.getElementById('cartas-unread-badge'),
+    cartasModal: document.getElementById('cartas-modal'),
+    cartasCloseBtn: document.getElementById('cartas-close-btn'),
+    cartasTabIn: document.getElementById('cartas-tab-in'),
+    cartasTabOut: document.getElementById('cartas-tab-out'),
+    cartasInBadge: document.getElementById('cartas-in-badge'),
+    cartasNewBtn: document.getElementById('cartas-new-btn'),
+    cartasCompose: document.getElementById('cartas-compose'),
+    cartaInput: document.getElementById('carta-input'),
+    cartaBody: document.getElementById('carta-compose-body'),
+    cartaCounter: document.getElementById('carta-counter'),
+    cartaCancelBtn: document.getElementById('carta-cancel-btn'),
+    cartaSendBtn: document.getElementById('carta-send-btn'),
+    cartasList: document.getElementById('cartas-list'),
+    cartaReader: document.getElementById('carta-reader'),
+    cartaReadFrom: document.getElementById('carta-read-from'),
+    cartaReadDate: document.getElementById('carta-read-date'),
+    cartaReadText: document.getElementById('carta-read-text'),
+    cartaCloseBtn: document.getElementById('carta-close-btn'),
+    cartaReadImgWrap: document.getElementById('carta-read-img-wrap'),
+    cartaReadImg: document.getElementById('carta-read-img'),
+    cartaReadScheduleInfo: document.getElementById('carta-read-schedule-info'),
+    cartaReadScheduleText: document.getElementById('carta-read-schedule-text'),
+    cartaImgBtn: document.getElementById('carta-img-btn'),
+    cartaImgInput: document.getElementById('carta-img-input'),
+    cartaImgPreview: document.getElementById('carta-img-preview'),
+    cartaImgThumb: document.getElementById('carta-img-thumb'),
+    cartaImgRemove: document.getElementById('carta-img-remove'),
+    cartaScheduleBtn: document.getElementById('carta-schedule-btn'),
+    cartaSchedulePicker: document.getElementById('carta-schedule-picker'),
+    cartaScheduleDatetime: document.getElementById('carta-schedule-datetime'),
+    cartaScheduleConfirm: document.getElementById('carta-schedule-confirm'),
+    cartaSchedulePreview: document.getElementById('carta-schedule-preview'),
+    cartaScheduleText: document.getElementById('carta-schedule-text'),
+    cartaScheduleRemove: document.getElementById('carta-schedule-remove'),
+    cartaStatsBtn: document.getElementById('cartas-stats-btn'),
+    cartaStatsPanel: document.getElementById('cartas-stats-panel'),
+    statSent: document.getElementById('stat-sent'),
+    statReceived: document.getElementById('stat-received'),
+    statRead: document.getElementById('stat-read'),
+    statUnread: document.getElementById('stat-unread')
+  };
+
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  initTheme();
+
+  /* STATIC ICONS */
+  renderIcon(document.querySelector('.welcome-icon'), 'messageCircle');
+  renderIcon(document.querySelector('.drag-drop-icon'), 'upload');
+  renderIcon(document.querySelector('.scroll-icon'), 'arrowDown');
+  renderIcon(el.imageBtn && el.imageBtn.querySelector('.btn-media-inner'), 'image');
+  renderIcon(el.pinnedBtn && el.pinnedBtn.querySelector('.btn-icon-inner'), 'pin');
+  renderIcon(el.searchToggleBtn && el.searchToggleBtn.querySelector('.btn-icon-inner'), 'search');
+  renderIcon(el.moreBtn && el.moreBtn.querySelector('.btn-icon-inner'), 'more');
+  renderIcon(el.settingsBtn && el.settingsBtn.querySelector('.btn-icon-inner'), 'settings');
+  renderIcon(el.refreshBtn && el.refreshBtn.querySelector('.btn-icon-inner'), 'sync');
+  renderIcon(el.settingsCloseBtn && el.settingsCloseBtn.querySelector('.btn-icon'), 'close');
+  renderIcon(el.emojiBtn && el.emojiBtn.querySelector('.btn-emoji-inner'), 'emoji');
+  renderIcon(el.voiceBtn && el.voiceBtn.querySelector('.btn-voice-inner'), 'mic');
+  renderIcon(el.sendBtn && el.sendBtn.querySelector('.btn-send-inner'), 'send');
+  renderIcon(el.pinnedCloseBtn && el.pinnedCloseBtn.querySelector('span'), 'close');
+  renderIcon(el.searchCloseBtn && el.searchCloseBtn.querySelector('span'), 'close');
+  var rpi = el.replyPreview && el.replyPreview.querySelector('.reply-preview-close span');
+  if (rpi) renderIcon(rpi, 'close');
+
+  /* LOGIN */
+  if (el.loginForm) el.loginForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var pw = el.loginPassword ? el.loginPassword.value.trim() : '';
+    if (!pw) { if (el.loginError) { el.loginError.textContent = 'Ingresa la clave'; el.loginError.style.display = 'block'; } return; }
+    if (el.loginError) el.loginError.style.display = 'none';
+    if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = true; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrando...'; }
+    tryLoginWithPassword(pw).catch(function(err) {
+      console.error('Login error:', err);
+      if (el.loginError) { el.loginError.textContent = 'Clave incorrecta'; el.loginError.style.display = 'block'; }
+      if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
+      if (el.loginPassword) el.loginPassword.value = '';
+    });
+  });
+
+  auth.onAuthStateChanged(function(user) { checkUserAccess(user); });
+  tryAutoLogin();
+
+  /* CHAT FORM */
+  if (el.chatForm) el.chatForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var text = el.messageInput ? el.messageInput.value.trim() : '';
+    if (!text || !currentUser) return;
+    el.messageInput.value = '';
+    sendMessage(text, null, null);
+  });
+  if (el.sendBtn) el.sendBtn.addEventListener('click', function(e) { e.preventDefault(); if (el.chatForm) el.chatForm.requestSubmit(); });
+  if (el.messageInput) el.messageInput.addEventListener('input', handleTypingInput);
+
+  /* IMAGES */
+  if (el.imageBtn) el.imageBtn.addEventListener('click', showImageOptionsModal);
+  if (el.optionCamera) el.optionCamera.addEventListener('click', function() { hideImageOptionsModal(); if (el.imageInputCamera) el.imageInputCamera.click(); });
+  if (el.optionGallery) el.optionGallery.addEventListener('click', function() { hideImageOptionsModal(); if (el.imageInputGallery) el.imageInputGallery.click(); });
+  if (el.imageOptionsCancel) el.imageOptionsCancel.addEventListener('click', hideImageOptionsModal);
+  if (el.imageInputCamera) el.imageInputCamera.addEventListener('change', function(e) { if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
+  if (el.imageInputGallery) el.imageInputGallery.addEventListener('change', function(e) { if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
+  if (el.previewSendBtn) el.previewSendBtn.addEventListener('click', sendPendingImages);
+  if (el.previewViewOnceBtn) el.previewViewOnceBtn.addEventListener('click', function() {
+    pendingViewOnce = !pendingViewOnce;
+    el.previewViewOnceBtn.classList.toggle('active', pendingViewOnce);
+    if (pendingViewOnce) {
+      el.previewViewOnceBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">visibility_off</span> Ver una vez';
+    } else {
+      el.previewViewOnceBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">visibility</span> Ver una vez';
+    }
+  });
+  if (el.previewCancelBtn) el.previewCancelBtn.addEventListener('click', hideImagePreviewModal);
+  if (el.previewCloseBtn) el.previewCloseBtn.addEventListener('click', hideImagePreviewModal);
+
+  /* VOICE */
+  var voiceTimer = null;
+  if (el.voiceBtn) {
+    el.voiceBtn.addEventListener('mousedown', function() { voiceTimer = setTimeout(startVoiceRecording, 300); });
+    el.voiceBtn.addEventListener('mouseup', function() { clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
+    el.voiceBtn.addEventListener('mouseleave', function() { clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
+    el.voiceBtn.addEventListener('touchstart', function(e) { e.preventDefault(); voiceTimer = setTimeout(startVoiceRecording, 300); }, { passive: false });
+    el.voiceBtn.addEventListener('touchend', function(e) { e.preventDefault(); clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
+  }
+  var vrc = document.getElementById('voice-rec-cancel-btn');
+  if (vrc) vrc.addEventListener('click', cancelVoiceRecording);
+
+  /* EMOJI */
+  if (el.emojiBtn) el.emojiBtn.addEventListener('click', toggleEmojiPicker);
+
+  /* GIFS */
+  if (el.gifBtn) el.gifBtn.addEventListener('click', toggleGifPicker);
+
+  /* ANNIVERSARY */
+  if (el.anniversarySaveBtn) el.anniversarySaveBtn.addEventListener('click', function() {
+    var val = el.anniversaryInput ? el.anniversaryInput.value : '';
+    if (!val || !/^\d{4}-\d{2}-\d{2}$/.test(val)) { showError('Elegí una fecha válida'); return; }
+    db.collection('rooms').doc(ROOM_ID).set({ anniversary: val }, { merge: true }).then(function() {
+      showSuccess('Aniversario guardado');
+    }).catch(function(){ showError('No se pudo guardar'); });
+  });
+
+  /* WISHLIST */
+  function openWishlistModal() {
+    if (!el.wishlistModal) return;
+    closeMoreModal();
+    enterSubPanel(el.wishlistModal);
+    renderWishlistList();
+    setTimeout(function() { if (el.wishlistInput) el.wishlistInput.focus(); }, 150);
+  }
+  if (el.wishlistBtn) el.wishlistBtn.addEventListener('click', openWishlistModal);
+  if (el.wishlistCloseBtn) el.wishlistCloseBtn.addEventListener('click', function(){ hideWishlistModal(); });
+  if (el.wishlistModal) el.wishlistModal.addEventListener('click', function(e) { if (e.target === el.wishlistModal) hideWishlistModal(); });
+  if (el.wishlistAddBtn) el.wishlistAddBtn.addEventListener('click', addWishlistItem);
+  if (el.wishlistInput) el.wishlistInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); addWishlistItem(); }
+  });
+
+  /* E2EE */
+  if (el.e2eeSaveBtn) el.e2eeSaveBtn.addEventListener('click', function() {
+    var input = document.getElementById('e2ee-pass-input');
+    if (input) saveE2eePass(input.value);
+  });
+  if (el.e2eeDisableBtn) el.e2eeDisableBtn.addEventListener('click', function() {
+    showConfirm('¿Desactivar el cifrado en este dispositivo? Los mensajes cifrados se verán como [🔒 Sin clave] hasta que actives la frase de nuevo.').then(function(ok) {
+      if (ok) disableE2eeLocal();
+    });
+  });
+
+  /* EXPORT */
+  if (el.exportTxtBtn) el.exportTxtBtn.addEventListener('click', exportChatTxt);
+  if (el.exportPdfBtn) el.exportPdfBtn.addEventListener('click', exportChatPdf);
+
+  /* SEARCH */
+  if (el.searchToggleBtn) el.searchToggleBtn.addEventListener('click', toggleSearch);
+  if (el.searchInput) el.searchInput.addEventListener('input', function(e) { filterMessages(e.target.value); });
+  if (el.searchCloseBtn) el.searchCloseBtn.addEventListener('click', toggleSearch);
+  var searchPrevBtn = document.getElementById('search-prev-btn');
+  var searchNextBtn = document.getElementById('search-next-btn');
+  if (searchPrevBtn) { searchPrevBtn.textContent = '\u25C0'; searchPrevBtn.addEventListener('click', searchPrev); }
+  if (searchNextBtn) { searchNextBtn.textContent = '\u25B6'; searchNextBtn.addEventListener('click', searchNext); }
+  if (el.searchInput) el.searchInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) searchPrev(); else searchNext(); }
+  });
+
+  /* REPLY PREVIEW */
+  if (el.replyPreview) { var rpx = el.replyPreview.querySelector('.reply-preview-close'); if (rpx) rpx.addEventListener('click', clearReplyPreview); }
+
+  /* EDIT MODAL */
+  if (el.editCancelBtn) el.editCancelBtn.addEventListener('click', closeEditModal);
+  if (el.editSaveBtn) el.editSaveBtn.addEventListener('click', saveEdit);
+  if (el.editModal) el.editModal.addEventListener('click', function(e) { if (e.target === el.editModal) closeEditModal(); });
+
+  /* PINNED */
+  if (el.pinnedBtn) el.pinnedBtn.addEventListener('click', function() {
+    if (pinnedMessages.length > 0) {
+      pinnedDismissedSig = null;
+      try { sessionStorage.removeItem(PINNED_DISMISS_KEY); } catch(err){}
+      renderPinnedBanner();
+      scrollToMessage(currentPin().id);
+    } else if (el.pinnedBanner) setPinnedBannerVisible(false);
+  });
+  if (el.pinnedMain) el.pinnedMain.addEventListener('click', function() {
+    var pin = currentPin();
+    if (pin) scrollToMessage(pin.id);
+  });
+  if (el.pinnedMain) el.pinnedMain.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); var pin = currentPin(); if (pin) scrollToMessage(pin.id); }
+  });
+  if (el.pinnedPrevBtn) el.pinnedPrevBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (pinnedMessages.length < 2) return;
+    pinnedIndex = (pinnedIndex - 1 + pinnedMessages.length) % pinnedMessages.length;
+    renderPinnedBanner();
+  });
+  if (el.pinnedNextBtn) el.pinnedNextBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (pinnedMessages.length < 2) return;
+    pinnedIndex = (pinnedIndex + 1) % pinnedMessages.length;
+    renderPinnedBanner();
+  });
+  if (el.pinnedUnpinBtn) el.pinnedUnpinBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var pin = currentPin();
+    if (pin) unpinMessage(pin.id);
+  });
+  if (el.pinnedCloseBtn) el.pinnedCloseBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    pinnedDismissedSig = pinnedSignature();
+    try { sessionStorage.setItem(PINNED_DISMISS_KEY, pinnedDismissedSig); } catch(err){}
+    setPinnedBannerVisible(false);
+  });
+
+  /* SETTINGS */
+  if (el.settingsBtn) el.settingsBtn.addEventListener('click', openSettingsModal);
+  if (el.settingsCloseBtn) el.settingsCloseBtn.addEventListener('click', closeSettingsModal);
+  if (el.settingsModal) el.settingsModal.addEventListener('click', function(e) { if (e.target === el.settingsModal) closeSettingsModal(); });
+  if (el.refreshBtn) el.refreshBtn.addEventListener('click', softRefresh);
+  if (el.logoutBtn) el.logoutBtn.addEventListener('click', function() { cleanupListeners(); auth.signOut().then(function() { showLoginScreen(); }); });
+
+  /* PROFILE */
+  if (el.profileSaveBtn) el.profileSaveBtn.addEventListener('click', saveProfile);
+  if (el.profileCancelBtn) el.profileCancelBtn.addEventListener('click', updateMyProfileUI);
+  if (el.profileAvatar) el.profileAvatar.addEventListener('click', function(e) {
+    if (myProfile.avatarBase64) {
+      e.stopPropagation();
+      openLightbox(myProfile.avatarBase64);
+      return;
+    }
+    if (el.profileAvatarInput) el.profileAvatarInput.click();
+  });
+  if (el.profileAvatarInput) el.profileAvatarInput.addEventListener('change', function(e) {
+    if (!e.target.files || !e.target.files[0]) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) { myProfile.avatarBase64 = ev.target.result; updateMyProfileUI(); };
+    reader.readAsDataURL(e.target.files[0]);
+  });
+  if (el.partnerProfileAvatar) el.partnerProfileAvatar.addEventListener('click', function() {
+    var av = partnerProfile.avatarBase64;
+    if (!av) return;
+    openLightbox(av);
+  });
+  if (el.headerPartnerAvatar) el.headerPartnerAvatar.addEventListener('click', function() {
+    var av = partnerProfile.avatarBase64;
+    if (!av) return;
+    openLightbox(av);
+  });
+
+  /* MÁS (HUB) */
+  if (el.moreBtn) el.moreBtn.addEventListener('click', openMoreModal);
+  if (el.moreCloseBtn) el.moreCloseBtn.addEventListener('click', closeMoreModal);
+  if (el.moreModal) el.moreModal.addEventListener('click', function(e) { if (e.target === el.moreModal) closeMoreModal(); });
+  if (el.cartasRow) el.cartasRow.addEventListener('click', function() { closeMoreModal(); openCartasModal(); });
+  if (el.mediaGalleryBtn) el.mediaGalleryBtn.addEventListener('click', function() { closeMoreModal(); openMediaGallery(); });
+  if (el.mediaGalleryClose) el.mediaGalleryClose.addEventListener('click', closeMediaGallery);
+  if (el.mediaGalleryModal) el.mediaGalleryModal.addEventListener('click', function(e) { if (e.target === el.mediaGalleryModal) closeMediaGallery(); });
+
+  /* CARTAS */
+  if (el.cartasCloseBtn) el.cartasCloseBtn.addEventListener('click', closeCartasModal);
+  if (el.cartasModal) el.cartasModal.addEventListener('click', function(e) { if (e.target === el.cartasModal) closeCartasModal(); });
+  if (el.cartasTabIn) el.cartasTabIn.addEventListener('click', function() { setCartasTab('in'); });
+  if (el.cartasTabOut) el.cartasTabOut.addEventListener('click', function() { setCartasTab('out'); });
+  if (el.cartasNewBtn) el.cartasNewBtn.addEventListener('click', function() {
+    if (el.cartasCompose) el.cartasCompose.classList.remove('hidden');
+    if (el.cartasNewBtn) el.cartasNewBtn.style.display = 'none';
+    setTimeout(function() { if (el.cartaInput) el.cartaInput.focus(); }, 120);
+  });
+  if (el.cartaInput) el.cartaInput.addEventListener('input', function() {
+    if (el.cartaCounter) {
+      var total = el.cartaInput.value.length + (el.cartaBody ? el.cartaBody.value.length : 0);
+      el.cartaCounter.textContent = total + '/4000';
+    }
+  });
+  if (el.cartaBody) el.cartaBody.addEventListener('input', function() {
+    if (el.cartaCounter) {
+      var total = (el.cartaInput ? el.cartaInput.value.length : 0) + el.cartaBody.value.length;
+      el.cartaCounter.textContent = total + '/4000';
+    }
+  });
+  if (el.cartaCancelBtn) el.cartaCancelBtn.addEventListener('click', hideCartasCompose);
+  if (el.cartaSendBtn) el.cartaSendBtn.addEventListener('click', sendCarta);
+  if (el.cartaCloseBtn) el.cartaCloseBtn.addEventListener('click', closeCartaReader);
+  if (el.cartaReader) el.cartaReader.addEventListener('click', function(e) { if (e.target === el.cartaReader) closeCartaReader(); });
+  document.querySelectorAll('.carta-compose-seal-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.carta-compose-seal-btn').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+    });
+  });
+  document.querySelectorAll('.carta-template-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var tpl = CARTA_TEMPLATES[btn.getAttribute('data-tpl')];
+      if (!tpl) return;
+      if (el.cartaInput) el.cartaInput.value = tpl.greeting;
+      if (el.cartaBody) el.cartaBody.value = tpl.body;
+      if (el.cartaCounter) {
+        var total = (tpl.greeting || '').length + (tpl.body || '').length;
+        el.cartaCounter.textContent = total + '/4000';
+      }
+    });
+  });
+  if (el.cartaImgBtn) el.cartaImgBtn.addEventListener('click', function() { if (el.cartaImgInput) el.cartaImgInput.click(); });
+  if (el.cartaImgInput) el.cartaImgInput.addEventListener('change', function(e) {
+    if (!e.target.files || !e.target.files[0]) return;
+    var file = e.target.files[0];
+    if (file.size > 5 * 1024 * 1024) { showError('La imagen no puede superar 5MB'); return; }
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      cartaSelectedImage = ev.target.result;
+      if (el.cartaImgThumb) el.cartaImgThumb.src = cartaSelectedImage;
+      if (el.cartaImgPreview) el.cartaImgPreview.classList.remove('hidden');
+      if (el.cartaImgBtn) el.cartaImgBtn.classList.add('active');
+    };
+    reader.readAsDataURL(file);
+  });
+  if (el.cartaImgRemove) el.cartaImgRemove.addEventListener('click', function() {
+    cartaSelectedImage = null;
+    if (el.cartaImgPreview) el.cartaImgPreview.classList.add('hidden');
+    if (el.cartaImgThumb) el.cartaImgThumb.src = '';
+    if (el.cartaImgInput) el.cartaImgInput.value = '';
+    if (el.cartaImgBtn) el.cartaImgBtn.classList.remove('active');
+  });
+  if (el.cartaScheduleBtn) el.cartaScheduleBtn.addEventListener('click', function() {
+    if (el.cartaSchedulePicker) {
+      var isHidden = el.cartaSchedulePicker.classList.contains('hidden');
+      el.cartaSchedulePicker.classList.toggle('hidden');
+      el.cartaScheduleBtn.classList.toggle('active', isHidden);
+    }
+  });
+  if (el.cartaScheduleConfirm) el.cartaScheduleConfirm.addEventListener('click', function() {
+    var val = el.cartaScheduleDatetime ? el.cartaScheduleDatetime.value : '';
+    if (!val) { showError('Selecciona una fecha y hora'); return; }
+    var d = new Date(val);
+    if (d.getTime() <= Date.now()) { showError('La fecha debe ser en el futuro'); return; }
+    cartaScheduledDate = d;
+    var dateStr = d.toLocaleDateString('es-ES') + ' ' + d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    if (el.cartaScheduleText) el.cartaScheduleText.textContent = dateStr;
+    if (el.cartaSchedulePreview) el.cartaSchedulePreview.classList.remove('hidden');
+    if (el.cartaSchedulePicker) el.cartaSchedulePicker.classList.add('hidden');
+    if (el.cartaScheduleBtn) el.cartaScheduleBtn.classList.add('active');
+  });
+  if (el.cartaScheduleRemove) el.cartaScheduleRemove.addEventListener('click', function() {
+    cartaScheduledDate = null;
+    if (el.cartaSchedulePreview) el.cartaSchedulePreview.classList.add('hidden');
+    if (el.cartaScheduleDatetime) el.cartaScheduleDatetime.value = '';
+    if (el.cartaScheduleBtn) el.cartaScheduleBtn.classList.remove('active');
+  });
+  if (el.cartaStatsBtn) el.cartaStatsBtn.addEventListener('click', function() {
+    if (el.cartaStatsPanel) el.cartaStatsPanel.classList.toggle('hidden');
+    updateCartasStats();
+  });
+
+  /* DESTACADOS */
+  if (el.myDestacadosBtn) el.myDestacadosBtn.addEventListener('click', function() { closeMoreModal(); showDestacadosModal('my'); });
+  if (el.partnerDestacadosBtn) el.partnerDestacadosBtn.addEventListener('click', function() { closeMoreModal(); showDestacadosModal('partner'); });
+  if (el.destacadosCloseBtn) el.destacadosCloseBtn.addEventListener('click', hideDestacadosModal);
+  if (el.destacadosModal) el.destacadosModal.addEventListener('click', function(e) { if (e.target === el.destacadosModal) hideDestacadosModal(); });
+  if (el.shareDestacadosToggle) el.shareDestacadosToggle.addEventListener('change', toggleShareDestacados);
+
+  /* SCROLL */
+  var loadingOlder = false;
+  function loadOlderMessages() {
+    if (loadingOlder || allMessages.length <= visibleCount) return;
+    loadingOlder = true;
+    var sc = el.messagesContainer;
+    var prevHeight = sc.scrollHeight, prevTop = sc.scrollTop;
+    visibleCount += 30;
+    renderMessagesList();
+    requestAnimationFrame(function() {
+      sc.scrollTop = sc.scrollHeight - prevHeight + prevTop;
+      loadingOlder = false;
+    });
+  }
+  if (el.scrollToBottomBtn) el.scrollToBottomBtn.addEventListener('click', scrollToBottom);
+  if (el.messagesContainer) el.messagesContainer.addEventListener('scroll', function() {
+    if (isUserAtBottom()) { unreadCount = 0; updateScrollButton(); }
+    if (el.messagesContainer.scrollTop < 80 && allMessages.length > visibleCount && !loadingOlder && firstSnapshotReceived) {
+      loadOlderMessages();
+    }
+  });
 
 /* DRAG & DROP */
   if (el.messagesContainer) {
@@ -2342,6 +3236,9 @@ function sendGifMessage(url, w, h) {
       closeReactionPicker();
       closeGifPicker();
       hideWishlistModal();
+      closeMoreModal();
+      closeCartasModal();
+      closeCartaReader();
       if (el.emojiPicker) el.emojiPicker.classList.add('hidden');
       if (el.imageOptionsModal) el.imageOptionsModal.style.display = 'none';
       if (el.imagePreviewModal) el.imagePreviewModal.style.display = 'none';
@@ -2354,7 +3251,7 @@ function sendGifMessage(url, w, h) {
   });
 
   /* ONLINE/OFFLINE */
-  window.addEventListener('online', function() { isOnline = true; if (el.offlineBanner) el.offlineBanner.style.display = 'none'; flushOfflineQueue(); });
+  window.addEventListener('online', function() { isOnline = true; if (el.offlineBanner) el.offlineBanner.style.display = 'none'; flushOfflineQueue(); flushCartasOfflineQueue(); });
   window.addEventListener('offline', function() { isOnline = false; if (el.offlineBanner) el.offlineBanner.style.display = 'flex'; });
   if (!isOnline && el.offlineBanner) el.offlineBanner.style.display = 'flex';
 

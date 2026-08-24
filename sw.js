@@ -1,4 +1,4 @@
-﻿const CACHE_NAME = 'chat-pareja-v3-2026';
+﻿const CACHE_NAME = 'chat-pareja-v4-2026';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

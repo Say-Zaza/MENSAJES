@@ -222,6 +222,8 @@ async function fetchFirestoreMessages(roomId, token) {
       if (fields.imageName?.stringValue !== undefined) msg.imageName = fields.imageName.stringValue;
       if (fields.audioBase64?.stringValue !== undefined) msg.audioBase64 = fields.audioBase64.stringValue;
       if (fields.audioMimeType?.stringValue !== undefined) msg.audioMimeType = fields.audioMimeType.stringValue;
+      if (fields.viewOnce !== undefined) msg.viewOnce = !!fields.viewOnce.booleanValue;
+      if (fields.viewOnceViewed !== undefined) msg.viewOnceViewed = !!fields.viewOnceViewed.booleanValue;
 
       if (fields.localTimestamp?.integerValue) {
         msg.timestamp = parseInt(fields.localTimestamp.integerValue, 10);
@@ -285,6 +287,8 @@ async function createFirestoreMessage(roomId, messageData, token, docId) {
     if (messageData.imageName) fields.imageName = { stringValue: messageData.imageName };
     if (messageData.audioBase64) fields.audioBase64 = { stringValue: messageData.audioBase64 };
     if (messageData.audioMimeType) fields.audioMimeType = { stringValue: messageData.audioMimeType };
+    if (messageData.viewOnce !== undefined) fields.viewOnce = { booleanValue: messageData.viewOnce };
+    if (messageData.viewOnceViewed !== undefined) fields.viewOnceViewed = { booleanValue: messageData.viewOnceViewed };
     if (messageData.status) fields.status = { stringValue: messageData.status };
     if (messageData.editedAt) fields.editedAt = { stringValue: messageData.editedAt };
     if (messageData.reactions) {
@@ -401,6 +405,28 @@ function settingsUrl(roomId, slot) {
 }
 function roomUrl(roomId) {
   return `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/rooms/${roomId}`;
+}
+function cartasUrl(roomId) {
+  return `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/rooms/${roomId}/cartas?pageSize=200`;
+}
+
+async function getCartasDoc(roomId, token) {
+  try {
+    const response = await fetch(cartasUrl(roomId), {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (response.status === 404) return [];
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const data = await response.json();
+    const docs = data.documents || [];
+    return docs.map(d => {
+      const snap = restFieldsToSnapshot(d.fields || {});
+      return { ...snap, id: d.name ? d.name.split("/").pop() : snap.id };
+    });
+  } catch (err) {
+    console.error(`❌ [SyncService] Error leyendo cartas de ${roomId}:`, err.message);
+    return [];
+  }
 }
 
 async function getRoomDoc(roomId, token) {
@@ -613,6 +639,15 @@ async function runSyncAndPrune(roomId = "general") {
     localDB.settings[roomId][slot] = { ...prev, shareDestacados: remoteSet.shareDestacados };
   }
 
+  // Respaldo permanente del buzón de cartas (sistema independiente; NUNCA se purga)
+  try {
+    const cartas = await getCartasDoc(roomId, token);
+    if (!localDB.cartas) localDB.cartas = {};
+    localDB.cartas[roomId] = cartas;
+  } catch (e) {
+    console.error("❌ [SyncService] Error respaldando cartas:", e.message);
+  }
+
   // Respaldo de perfiles/presencia de las 2 cuentas fijas
   if (!localDB.users) localDB.users = {};
   if (!localDB.users[roomId]) localDB.users[roomId] = {};
@@ -683,8 +718,7 @@ function startSyncLoop(intervalMinutes = 15, roomId = "general") {
 
 module.exports = {
   getAuthToken,
-  readLocalDB,
-  writeLocalDB,
+  readLocalDB,  writeLocalDB,
   readLocalDBAsync,
   writeLocalDBAsync,
   saveMediaFileLocally,

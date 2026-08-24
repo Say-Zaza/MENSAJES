@@ -4,9 +4,9 @@ describe('Reactions - Horizontal Picker', () => {
   before(() => {
     cy.visit('/');
     cy.waitForReady();
-    cy.cleanupFirestore();
-    cy.reload();
-    cy.waitForReady();
+    cy.window().then((win) => {
+      win.eval(`db.doc('rooms/general').set({ pinnedMessages: [] }, { merge: true })`);
+    });
   });
 
   beforeEach(() => {
@@ -79,7 +79,7 @@ describe('Reactions - Horizontal Picker', () => {
       cy.get('#active-context-menu').contains('Reaccionar').click();
       cy.get('#reaction-picker').should('not.have.class', 'hidden');
       
-      cy.keyboard({ key: 'Escape' });
+      cy.get('body').type('{esc}');
       cy.get('#reaction-picker').should('have.class', 'hidden');
     });
   });
@@ -100,8 +100,9 @@ describe('Reactions - Horizontal Picker', () => {
       cy.waitForMessage(testMsg);
 
       cy.pickReaction(testMsg, 0);
-      cy.get('.reaction-bubble', { timeout: 15000 }).should('exist');
-      cy.get('.reaction-bubble').should('contain', '1');
+      const $wrap = () => cy.contains('.message-wrapper', testMsg);
+      $wrap().find('.reaction-bubble', { timeout: 15000 }).should('exist');
+      $wrap().find('.reaction-bubble').should('contain', '1');
     });
 
     it('highlights own reaction', () => {
@@ -119,10 +120,11 @@ describe('Reactions - Horizontal Picker', () => {
       cy.waitForMessage(testMsg);
 
       cy.pickReaction(testMsg, 0);
-      cy.get('.reaction-bubble', { timeout: 15000 }).should('exist');
-      
-      cy.get('.reaction-bubble.user-reacted').click({ force: true });
-      cy.get('.reaction-bubble', { timeout: 20000 }).should('not.exist');
+      const $w = () => cy.contains('.message-wrapper', testMsg);
+      $w().find('.reaction-bubble', { timeout: 15000 }).should('exist');
+
+      $w().find('.reaction-bubble.user-reacted').click({ force: true });
+      $w().find('.reaction-bubble', { timeout: 20000 }).should('not.exist');
     });
 
     it('replaces reaction when choosing different emoji', () => {
@@ -131,11 +133,12 @@ describe('Reactions - Horizontal Picker', () => {
       cy.waitForMessage(testMsg);
 
       cy.pickReaction(testMsg, 0);
-      cy.get('.reaction-bubble', { timeout: 15000 }).should('exist');
-      cy.get('.reaction-bubble').first().invoke('text').then(firstEmoji => {
+      const $w = () => cy.contains('.message-wrapper', testMsg);
+      $w().find('.reaction-bubble', { timeout: 15000 }).should('exist');
+      $w().find('.reaction-bubble').first().invoke('text').then(firstEmoji => {
         cy.pickReaction(testMsg, 1);
-        cy.get('.reaction-bubble', { timeout: 15000 }).should('exist');
-        cy.get('.reaction-bubble').first().invoke('text').should('not.eq', firstEmoji);
+        $w().find('.reaction-bubble', { timeout: 15000 }).should('exist');
+        $w().find('.reaction-bubble').first().invoke('text').should('not.eq', firstEmoji);
       });
     });
   });
@@ -169,7 +172,17 @@ describe('Reactions - Horizontal Picker', () => {
       
       cy.login('user1');
       cy.waitForMessage(testMsg);
-      cy.get('.reaction-bubble', { timeout: 20000 }).should('contain', '2');
+      // Verdad de servidor: el documento debe tener 2 uids en la misma reacción
+      cy.window().then((win) => {
+        return win.db.collection('rooms/general/messages')
+          .where('texto', '==', testMsg).limit(1).get()
+          .then((snap) => {
+            const r = snap.docs[0].data().reactions || {};
+            const arr = Object.values(r)[0] || [];
+            expect(arr.length, 'uids agrupados').to.eq(2);
+          });
+      });
+      cy.contains('.message-wrapper', testMsg).find('.reaction-bubble', { timeout: 20000 }).should('exist');
     });
   });
 
@@ -180,13 +193,23 @@ describe('Reactions - Horizontal Picker', () => {
       cy.waitForMessage(testMsg);
 
       cy.window().then(win => {
-        const origUpdate = win.db.collection().doc().update;
-        win.db.collection().doc().update = () => Promise.reject(new Error('Network error'));
+        const origCollection = win.db.collection.bind(win.db);
+        win.db.collection = (path) => {
+          const c = origCollection(path);
+          const origDoc = c.doc.bind(c);
+          c.doc = (id) => {
+            const d = origDoc(id);
+            const origUpdate = d.update;
+            d.update = () => Promise.reject(new Error('Network error'));
+            return d;
+          };
+          return c;
+        };
         
         cy.pickReaction(testMsg, 0);
         cy.wait(2000);
         
-        win.db.collection().doc().update = origUpdate;
+        win.db.collection = origCollection;
       });
     });
   });

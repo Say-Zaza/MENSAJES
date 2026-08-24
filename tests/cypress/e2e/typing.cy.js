@@ -9,9 +9,13 @@ describe('Typing Indicator', () => {
   before(() => {
     cy.visit('/');
     cy.waitForReady();
-    cy.cleanupFirestore();
-    cy.reload();
-    cy.waitForReady();
+    cy.window().then((win) => {
+      win.eval(`db.collection('rooms/general/typing').get().then(s => {
+        const b = db.batch();
+        s.docs.forEach(d => b.delete(d.ref));
+        return b.commit();
+      }).catch(() => {})`);
+    });
   });
 
   let partnerToken;
@@ -37,23 +41,19 @@ describe('Typing Indicator', () => {
     }
   });
 
-  it('shows partner typing indicator', () => {
-    cy.request({
-      method: 'POST',
-      url: `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/${TYPING_DOC_PATH}?documentId=${partnerUid}`,
-      headers: {
-        Authorization: `Bearer ${partnerToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: {
-        fields: {
-          uid: { stringValue: partnerUid },
-          username: { stringValue: 'Mi Amor' },
-          isTyping: { booleanValue: true },
-          updatedAt: { timestampValue: new Date().toISOString() }
-        }
-      }
+it('shows partner typing indicator', () => {
+    cy.window().then((win) => {
+      return win.db.collection(TYPING_DOC_PATH).doc(partnerUid).set({
+        uid: partnerUid,
+        username: 'Mi Amor',
+        isTyping: true,
+        updatedAt: new Date().toISOString()
+      });
     });
+
+    cy.get('#typing-indicator').should('not.have.class', 'hidden');
+    cy.get('#typing-indicator').should('contain', 'Mi Amor estǭ escribiendo');
+  });
 
     cy.get('#typing-indicator').should('not.have.class', 'hidden');
     cy.get('#typing-indicator').should('contain', 'Mi Amor está escribiendo');

@@ -23,6 +23,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Manrope:wght@200..800&family=Nothing+You+Could+Do&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="style.css">
 
@@ -33,8 +35,178 @@
 
   <!-- Icon System -->
   <script src="icons.js"></script>
+</script>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+              extend: {
+                "colors": {
+                    "on-primary-container": "#ff9eaf",
+                    "inverse-surface": "#31302d",
+                    "surface-dim": "#dddad4",
+                    "error-container": "#ffdad6",
+                    "on-secondary-fixed-variant": "#594047",
+                    "on-primary": "#ffffff",
+                    "outline-variant": "#ddbfc3",
+                    "error": "#ba1a1a",
+                    "inverse-primary": "#ffb2be",
+                    "primary": "#6c0028",
+                    "inverse-on-surface": "#f4f0ea",
+                    "primary-container": "#8d1b3d",
+                    "primary-fixed-dim": "#ffb2be",
+                    "secondary-container": "#fed9e2",
+                    "secondary-fixed": "#fed9e2",
+                    "on-error-container": "#93000a",
+                    "surface-container": "#f1ede7",
+                    "secondary-fixed-dim": "#e0bec6",
+                    "on-surface": "#1c1c18",
+                    "on-tertiary-container": "#4f3e00",
+                    "on-secondary-container": "#795d65",
+                    "on-secondary-fixed": "#2a161c",
+                    "primary-fixed": "#ffd9de",
+                    "secondary": "#72575f",
+                    "background": "#fdf9f3",
+                    "surface": "#fdf9f3",
+                    "on-primary-fixed": "#400014",
+                    "surface-variant": "#e6e2dc",
+                    "surface-tint": "#a93151",
+                    "surface-bright": "#fdf9f3",
+                    "on-secondary": "#ffffff",
+                    "tertiary": "#735c00",
+                    "on-tertiary": "#ffffff",
+                    "on-tertiary-fixed-variant": "#574500",
+                    "tertiary-container": "#cca830",
+                    "on-error": "#ffffff",
+                    "on-primary-fixed-variant": "#89173a",
+                    "tertiary-fixed": "#ffe088",
+                    "tertiary-fixed-dim": "#e9c349",
+                    "surface-container-highest": "#e6e2dc",
+                    "outline": "#8a7174",
+                    "on-background": "#1c1c18",
+                    "surface-container-lowest": "#ffffff",
+                    "surface-container-low": "#f7f3ed",
+                    "on-surface-variant": "#574144",
+                    "on-tertiary-fixed": "#241a00",
+                    "surface-container-high": "#ebe8e2"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "unit": "8px",
+                    "section-gap": "48px",
+                    "gutter": "16px",
+                    "container-padding-mobile": "24px",
+                    "container-padding-desktop": "64px"
+            },
+            "fontFamily": {
+                    "headline-md": [
+                            "EB Garamond"
+                    ],
+                    "body-md": [
+                            "Manrope"
+                    ],
+                    "label-sm": [
+                            "Manrope"
+                    ],
+                    "body-lg": [
+                            "Manrope"
+                    ],
+                    "headline-lg-mobile": [
+                            "EB Garamond"
+                    ],
+                    "headline-lg": [
+                            "EB Garamond"
+                    ]
+            },
+            "fontSize": {
+                    "headline-md": [
+                            "28px",
+                            {
+                                    "lineHeight": "34px",
+                                    "fontWeight": "500"
+                            }
+                    ],
+                    "body-md": [
+                            "16px",
+                            {
+                                    "lineHeight": "24px",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "label-sm": [
+                            "12px",
+                            {
+                                    "lineHeight": "16px",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "body-lg": [
+                            "18px",
+                            {
+                                    "lineHeight": "28px",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "headline-lg-mobile": [
+                            "32px",
+                            {
+                                    "lineHeight": "38px",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "headline-lg": [
+                            "40px",
+                            {
+                                    "lineHeight": "48px",
+                                    "letterSpacing": "-0.02em",
+                                    "fontWeight": "600"
+                            }
+                    ]
+            }
+      },
+          },
+        }
+    </script>
+<style>
+        .noise-bg {
+            position: relative !important;
+        }
+        .noise-bg::before {
+            content: "";
+            position: absolute !important;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E") !important;
+            pointer-events: none !important;
+            z-index: 10 !important;
+        }
+        .burgundy-shadow {
+            box-shadow: 0 20px 40px -15px rgba(108, 0, 40, 0.08) !important;
+        }
+        textarea {
+            resize: none !important;
+            background: transparent !important;
+        }
+        textarea:focus {
+            outline: none !important;
+            box-shadow: none !important;
+        }
+        ::-webkit-scrollbar { width: 6px !important; }
+        ::-webkit-scrollbar-track { background: transparent !important; }
+        ::-webkit-scrollbar-thumb { background-color: #dddad4 !important; border-radius: 10px !important; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh) !important;
+    }
+  </style>
 </head>
-<body>
+<body class="bg-surface h-full flex flex-col antialiased noise-bg text-on-surface">
   <!-- Login Screen (cuentas fijas de la pareja) -->
   <div id="login-screen" class="login-screen">
     <div class="login-card">
@@ -71,8 +243,8 @@
 
     <!-- Header -->
     <header class="chat-header" role="banner">
-      <div class="header-left">
-        <div id="header-partner-avatar" class="header-partner-avatar">
+        <div class="header-left">
+        <div id="header-partner-avatar" class="header-partner-avatar clickable" role="button" tabindex="0" aria-label="Ver foto de perfil">
           <img id="header-partner-img" src="" alt="" style="display:none">
           <span id="header-partner-initial" class="header-partner-initial"></span>
         </div>
@@ -81,6 +253,7 @@
             <h1 id="header-partner-name">Mi Amor</h1>
           </div>
           <div class="header-sub-row">
+            <span id="header-partner-bio" class="header-partner-bio"></span>
             <span id="user-badge" class="user-badge">Conectando...</span>
             <button type="button" id="anniversary-chip" class="anniversary-chip hidden" aria-live="polite"></button>
             <span id="pending-indicator" class="pending-indicator hidden" aria-live="polite"></span>
@@ -251,7 +424,7 @@
         <div class="settings-section">
           <h3>Tu pareja</h3>
           <div class="partner-profile-card">
-            <div id="partner-profile-avatar" class="partner-profile-avatar" aria-hidden="true"></div>
+            <div id="partner-profile-avatar" class="partner-profile-avatar clickable" role="button" tabindex="0" aria-label="Ver foto de perfil"></div>
             <div class="partner-profile-info">
               <span id="partner-profile-name" class="partner-profile-name">Mi Amor</span>
               <span id="partner-profile-bio" class="partner-profile-bio"></span>
@@ -409,6 +582,14 @@
           </span>
           <span id="cartas-unread-badge" class="more-row-badge hidden"></span>
         </button>
+        <button type="button" id="media-gallery-btn" class="more-row">
+          <span class="more-row-icon">🖼️</span>
+          <span class="more-row-text">
+            <span class="more-row-label">Galería de medios</span>
+            <span class="more-row-sub">Todas las imágenes del chat</span>
+          </span>
+          <span id="media-count" class="more-row-badge soft"></span>
+        </button>
         <button type="button" id="my-destacados-btn" class="more-row">
           <span class="more-row-icon">⭐</span>
           <span class="more-row-text">
@@ -441,77 +622,145 @@
     </div>
   </div>
 
-  <!-- Buzón de Cartas -->
-  <div id="cartas-modal" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Buzón de cartas">
-    <div class="destacados-modal-content cartas-content">
-      <div class="destacados-header">
-        <h3 class="destacados-title">💌 Buzón de cartas</h3>
-        <button type="button" id="cartas-close-btn" class="btn-icon" aria-label="Cerrar buzón">
-          <span aria-hidden="true"></span>
+    <!-- Buzón de Cartas -->
+  <div id="cartas-modal" class="cartas-overlay hidden" role="dialog" aria-modal="true" aria-label="Buzón de cartas">
+    <div class="cartas-vintage-container">
+      <div class="cartas-vintage-header">
+        <span class="material-symbols-outlined cartas-header-icon" style="font-variation-settings:'FILL' 1;">favorite</span>
+        <h1 class="cartas-vintage-title">Our Forever</h1>
+        <button type="button" id="cartas-stats-btn" class="cartas-stats-btn" title="Estadísticas">
+          <span class="material-symbols-outlined">bar_chart</span>
+        </button>
+        <button type="button" id="cartas-close-btn" class="cartas-close-btn" aria-label="Cerrar buzón">
+          <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-      <div class="cartas-tabs" role="tablist">
-        <button type="button" id="cartas-tab-in" class="cartas-tab active" role="tab">Recibidas <span id="cartas-in-badge" class="tab-badge hidden"></span></button>
-        <button type="button" id="cartas-tab-out" class="cartas-tab" role="tab">Enviadas</button>
-      </div>
-      <div class="cartas-compose-wrap">
-        <button type="button" id="cartas-new-btn" class="profile-btn primary cartas-new-btn">✍️ Escribir carta</button>
-        <div id="cartas-compose" class="cartas-compose hidden">
-          <div class="w-full bg-surface-container-lowest rounded-xl burgundy-shadow p-6 md:p-10 relative overflow-hidden flex flex-col min-h-[442px]">
-            <input class="w-full font-headline-md text-headline-md text-primary bg-transparent border-none p-0 mb-6 placeholder-primary/40 focus:ring-0" placeholder="Dearest," type="text"/>
-            <textarea class="w-full flex-grow font-body-lg text-body-lg text-on-surface leading-relaxed placeholder-on-surface/30 border-none p-0 focus:ring-0" placeholder="Pen your thoughts..." rows="5" maxlength="4000" autocomplete="off"></textarea>
-            <div class="mt-8 flex gap-4 overflow-x-auto hidden">
-              <div class="w-24 h-24 rounded-lg bg-surface-container overflow-hidden border border-outline-variant flex-shrink-0 relative">
-                <img class="w-full h-full object-cover grayscale opacity-80 mix-blend-multiply" data-alt="A soft focus, faded polaroid style photo of hands clasped together, warm light, vintage film aesthetic, high-end fine art photography style, subtle noise grain, delicate lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDjNx5jix6hVqR6AJbwz1mFrabix-rzzKKsdsJN_nxSKhkLeWgqcLLnwEsyYgd3goMi52XI0DXn9r2yOvAlG-n6QOSJwCPFHVuU2FLAnmDIm05u5PO2zamGS79VJjw6NUbXZLUTziU2ZzO0qI3IzTN_5TY9yeaFMfLcShgh9NF8sqGZ43nDkLRcXXM9LLDcnLutK1fpC4W1CJXkvB04snDZJ8SuQO7JP0UdnV0y-modoi4VI1BgD2MNYA"/>
-                <button class="absolute top-1 right-1 bg-surface-container-lowest/80 rounded-full p-1 text-on-surface w-6 h-6 flex items-center justify-center">
-                  <span class="material-symbols-outlined text-[16px]">close</span>
-                </button>
-              </div>
-            </div>
-            <div class="mt-8 pt-4 border-t-[0.5px] border-tertiary-container/30 flex items-center justify-between">
-              <button class="flex items-center gap-2 text-secondary hover:text-primary transition-colors group">
-                <span class="material-symbols-outlined group-hover:scale-110 transition-transform">add_photo_alternate</span>
-                <span class="font-label-sm text-label-sm">Add Memento</span>
-              </button>
-              <div class="flex items-center gap-3">
-                <span class="font-label-sm text-label-sm text-on-surface-variant">Seal:</span>
-                <button class="w-8 h-8 rounded-full bg-primary flex items-center justify-center shadow-md active:scale-90 transition-transform">
-                  <span class="material-symbols-outlined text-on-primary text-[16px]" style="font-variation-settings: 'FILL' 1;">favorite</span>
-                </button>
-                <button class="w-8 h-8 rounded-full border border-tertiary-container bg-surface flex items-center justify-center text-tertiary hover:bg-surface-variant transition-colors">
-                  <span class="material-symbols-outlined text-[16px]">ac_unit</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <span id="carta-counter" class="carta-counter">0/4000</span>
-          <button type="button" id="carta-cancel-btn" class="profile-btn ghost">Cancelar</button>
-          <button type="button" id="carta-send-btn" class="profile-btn primary">Enviar 💌</button>
+      <div class="cartas-hero-divider"><span class="material-symbols-outlined" style="font-size:10px;font-variation-settings:'FILL' 1;color:#cca830;">favorite</span></div>
+      <!-- Stats panel -->
+      <div id="cartas-stats-panel" class="cartas-stats-panel hidden">
+        <div class="cartas-stats-grid">
+          <div class="cartas-stat"><span class="cartas-stat-num" id="stat-sent">0</span><span class="cartas-stat-label">Enviadas</span></div>
+          <div class="cartas-stat"><span class="cartas-stat-num" id="stat-received">0</span><span class="cartas-stat-label">Recibidas</span></div>
+          <div class="cartas-stat"><span class="cartas-stat-num" id="stat-read">0</span><span class="cartas-stat-label">Leídas</span></div>
+          <div class="cartas-stat"><span class="cartas-stat-num" id="stat-unread">0</span><span class="cartas-stat-label">Sin leer</span></div>
         </div>
       </div>
-      <div id="cartas-list" class="cartas-list"></div>
+      <div class="cartas-vintage-tabs">
+        <button type="button" id="cartas-tab-in" class="cartas-vintage-tab active" role="tab">Recibidas <span id="cartas-in-badge" class="cartas-tab-badge hidden"></span></button>
+        <button type="button" id="cartas-tab-out" class="cartas-vintage-tab" role="tab">Enviadas</button>
+      </div>
+      <div class="cartas-compose-wrap">
+        <button type="button" id="cartas-new-btn" class="cartas-new-btn">
+          <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">edit</span> Escribir carta
+        </button>
+      </div>
+      <div id="cartas-compose" class="cartas-compose hidden">
+        <div class="carta-compose-paper">
+          <div class="carta-compose-texture"></div>
+          <!-- Templates row -->
+          <div class="carta-templates-row">
+            <span class="carta-templates-label">Plantillas</span>
+            <div class="carta-templates-scroll">
+              <button type="button" class="carta-template-btn" data-tpl="cumple">🎂 Cumpleaños</button>
+              <button type="button" class="carta-template-btn" data-tpl="aniversario">💕 Aniversario</button>
+              <button type="button" class="carta-template-btn" data-tpl="buenos-dias">☀️ Buenos días</button>
+              <button type="button" class="carta-template-btn" data-tpl="buenas-noches">🌙 Buenas noches</button>
+              <button type="button" class="carta-template-btn" data-tpl="perdon">🙏 Perdón</button>
+              <button type="button" class="carta-template-btn" data-tpl="te-extraño">🥺 Te extraño</button>
+              <button type="button" class="carta-template-btn" data-tpl="gracias">💛 Gracias</button>
+              <button type="button" class="carta-template-btn" data-tpl="vacio">📝 En blanco</button>
+            </div>
+          </div>
+          <input id="carta-input" class="carta-compose-greeting" type="text" placeholder="Dearest," maxlength="100" autocomplete="off"/>
+          <textarea id="carta-compose-body" class="carta-compose-body" placeholder="Pen your thoughts..." rows="8" maxlength="4000" autocomplete="off"></textarea>
+          <!-- Image preview -->
+          <div id="carta-img-preview" class="carta-img-preview hidden">
+            <img id="carta-img-thumb" class="carta-img-thumb" src="" alt="adjunto"/>
+            <button type="button" id="carta-img-remove" class="carta-img-remove" title="Quitar imagen">✕</button>
+          </div>
+          <!-- Schedule preview -->
+          <div id="carta-schedule-preview" class="carta-schedule-preview hidden">
+            <span class="material-symbols-outlined" style="font-size:16px;color:#6c0028;">schedule</span>
+            <span id="carta-schedule-text" class="carta-schedule-text"></span>
+            <button type="button" id="carta-schedule-remove" class="carta-schedule-remove" title="Quitar programación">✕</button>
+          </div>
+          <div class="carta-compose-seal">
+            <span class="carta-compose-seal-label">SELLO</span>
+            <button type="button" class="carta-compose-seal-btn active" data-seal="favorite">
+              <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">favorite</span>
+            </button>
+            <button type="button" class="carta-compose-seal-btn" data-seal="ac_unit">
+              <span class="material-symbols-outlined">ac_unit</span>
+            </button>
+            <button type="button" class="carta-compose-seal-btn" data-seal="star">
+              <span class="material-symbols-outlined">star</span>
+            </button>
+            <button type="button" class="carta-compose-seal-btn" data-seal="local_florist">
+              <span class="material-symbols-outlined">local_florist</span>
+            </button>
+            <button type="button" class="carta-compose-seal-btn" data-seal="eco">
+              <span class="material-symbols-outlined">eco</span>
+            </button>
+            <button type="button" class="carta-compose-seal-btn" data-seal="spa">
+              <span class="material-symbols-outlined">spa</span>
+            </button>
+          </div>
+          <!-- Action buttons row -->
+          <div class="carta-compose-tools">
+            <button type="button" id="carta-img-btn" class="carta-tool-btn" title="Adjuntar imagen">
+              <span class="material-symbols-outlined">image</span>
+            </button>
+            <button type="button" id="carta-schedule-btn" class="carta-tool-btn" title="Programar envío">
+              <span class="material-symbols-outlined">schedule_send</span>
+            </button>
+            <input type="file" id="carta-img-input" accept="image/*" class="hidden-input"/>
+            <!-- Schedule picker (hidden by default) -->
+            <div id="carta-schedule-picker" class="carta-schedule-picker hidden">
+              <input type="datetime-local" id="carta-schedule-datetime" class="carta-schedule-datetime"/>
+              <button type="button" id="carta-schedule-confirm" class="carta-schedule-confirm-btn">OK</button>
+            </div>
+          </div>
+        </div>
+        <div class="carta-compose-footer">
+          <span id="carta-counter" class="carta-counter">0/4000</span>
+          <div class="carta-compose-actions">
+            <button type="button" id="carta-cancel-btn" class="carta-compose-btn cancel">Cancelar</button>
+            <button type="button" id="carta-send-btn" class="carta-compose-btn send">Enviar 💌</button>
+          </div>
+        </div>
+      </div>
+      <div id="cartas-list" class="cartas-vintage-list"></div>
     </div>
   </div>
 
   <!-- Lector de carta -->
-  <div id="carta-reader" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Leer carta">
-    <div class="destacados-modal-content carta-reader-content">
+  <div id="carta-reader" class="cartas-overlay hidden" role="dialog" aria-modal="true" aria-label="Leer carta">
+    <div class="carta-reader-container">
       <div class="carta-paper">
+        <div class="carta-paper-texture"></div>
         <div class="carta-paper-head">
           <span id="carta-read-from" class="carta-read-from"></span>
           <span id="carta-read-date" class="carta-read-date"></span>
         </div>
         <p id="carta-read-text" class="carta-read-text"></p>
+        <div id="carta-read-img-wrap" class="carta-read-img-wrap hidden">
+          <img id="carta-read-img" class="carta-read-img" src="" alt="carta adjunto"/>
+        </div>
+        <div id="carta-read-schedule-info" class="carta-read-schedule-info hidden">
+          <span class="material-symbols-outlined" style="font-size:14px;">schedule</span>
+          <span id="carta-read-schedule-text"></span>
+        </div>
         <div class="carta-signature">— 💕 —</div>
       </div>
       <div class="carta-reader-actions">
-        <button type="button" id="carta-delete-btn" class="profile-btn ghost danger hidden">Eliminar</button>
-        <button type="button" id="carta-close-btn" class="profile-btn primary">Cerrar</button>
+        <button type="button" id="carta-close-btn" class="carta-reader-btn close">
+          <span class="material-symbols-outlined">close</span> Cerrar
+        </button>
       </div>
     </div>
   </div>
 
-  <!-- Destacados Modal -->
+<!-- Destacados Modal -->
   <div id="destacados-modal" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Destacados">
     <div class="destacados-modal-content">
       <div class="destacados-header">
@@ -538,6 +787,19 @@
         <button type="button" id="wishlist-add-btn" class="profile-btn primary">Agregar</button>
       </div>
       <div id="wishlist-list" class="wishlist-list"></div>
+    </div>
+  </div>
+
+  <!-- Media Gallery Modal -->
+  <div id="media-gallery-modal" class="destacados-modal hidden" role="dialog" aria-modal="true" aria-label="Galería de medios">
+    <div class="destacados-modal-content">
+      <div class="destacados-header">
+        <h3 class="destacados-title">Galería 🖼️</h3>
+        <button type="button" id="media-gallery-close" class="btn-icon" aria-label="Cerrar galería">
+          <span aria-hidden="true"></span>
+        </button>
+      </div>
+      <div id="media-gallery-grid" class="media-gallery-grid"></div>
     </div>
   </div>
 
@@ -572,6 +834,9 @@
       </div>
       <div class="image-preview-actions">
         <button type="button" id="preview-cancel-btn" class="preview-btn ghost">Cancelar</button>
+        <button type="button" id="preview-viewonce-btn" class="preview-btn viewonce-btn" title="Ver una vez">
+          <span class="material-symbols-outlined" style="font-size:18px;">visibility</span> Ver una vez
+        </button>
         <button type="button" id="preview-send-btn" class="preview-btn primary">Enviar</button>
       </div>
     </div>
@@ -589,5 +854,10 @@
       });
     }
   </script>
+  <div id="avatar-lightbox" class="avatar-lightbox hidden" role="dialog" aria-label="Foto de perfil">
+    <div class="avatar-lightbox-backdrop"></div>
+    <img id="avatar-lightbox-img" class="avatar-lightbox-img" src="" alt="Foto de perfil"/>
+    <button type="button" id="avatar-lightbox-close" class="avatar-lightbox-close" aria-label="Cerrar">&times;</button>
+  </div>
 </body>
 </html>

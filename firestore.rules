@@ -44,6 +44,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Cartas del buzón (sistema independiente de mensajes)
+    match /rooms/{roomId}/cartas/{cartaId} {
+      allow read: if request.auth != null && isAllowedAccount(request.auth.token.email);
+      allow create: if request.auth != null
+        && isAllowedAccount(request.auth.token.email)
+        && request.resource.data.deUid == request.auth.uid;
+      allow update: if request.auth != null
+        && isAllowedAccount(request.auth.token.email);
+      allow delete: if request.auth != null
+        && isAllowedAccount(request.auth.token.email)
+        && resource.data.deUid == request.auth.uid;
+    }
+
     // Wishlist / Bucket list compartida
     match /rooms/{roomId}/wishlist/{itemId} {
       allow read: if request.auth != null && isAllowedAccount(request.auth.token.email);
