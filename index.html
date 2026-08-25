@@ -628,6 +628,14 @@
             <span class="more-row-sub">Gráficos de actividad</span>
           </span>
         </button>
+        <button type="button" id="reminders-row" class="more-row">
+          <span class="more-row-icon">⏰</span>
+          <span class="more-row-text">
+            <span class="more-row-label">Recordatorios</span>
+            <span class="more-row-sub">No olvides lo importante</span>
+          </span>
+          <span id="reminders-count" class="more-row-badge soft"></span>
+        </button>
       </div>
       <label class="settings-toggle-row more-share-row">
         <span class="settings-toggle-label">Compartir mis destacados con mi pareja</span>
@@ -672,22 +680,12 @@
       <div id="cartas-compose" class="cartas-compose hidden">
         <div class="carta-compose-paper">
           <div class="carta-compose-texture"></div>
-          <!-- Templates row -->
-          <div class="carta-templates-row">
-            <span class="carta-templates-label">Plantillas</span>
-            <div class="carta-templates-scroll">
-              <button type="button" class="carta-template-btn" data-tpl="cumple">🎂 Cumpleaños</button>
-              <button type="button" class="carta-template-btn" data-tpl="aniversario">💕 Aniversario</button>
-              <button type="button" class="carta-template-btn" data-tpl="buenos-dias">☀️ Buenos días</button>
-              <button type="button" class="carta-template-btn" data-tpl="buenas-noches">🌙 Buenas noches</button>
-              <button type="button" class="carta-template-btn" data-tpl="perdon">🙏 Perdón</button>
-              <button type="button" class="carta-template-btn" data-tpl="te-extraño">🥺 Te extraño</button>
-              <button type="button" class="carta-template-btn" data-tpl="gracias">💛 Gracias</button>
-              <button type="button" class="carta-template-btn" data-tpl="vacio">📝 En blanco</button>
-            </div>
+          <div class="carta-compose-heading">
+            <span class="material-symbols-outlined" style="font-size:18px;color:#6c0028;font-variation-settings:'FILL' 1;">edit</span>
+            <span class="carta-compose-heading-text">Carta</span>
           </div>
-          <input id="carta-input" class="carta-compose-greeting" type="text" placeholder="Dearest," maxlength="100" autocomplete="off"/>
-          <textarea id="carta-compose-body" class="carta-compose-body" placeholder="Pen your thoughts..." rows="8" maxlength="4000" autocomplete="off"></textarea>
+          <input id="carta-input" class="carta-compose-greeting" type="text" placeholder="Asunto," maxlength="100" autocomplete="off"/>
+          <textarea id="carta-compose-body" class="carta-compose-body" placeholder="Escribe tu carta aquí..." rows="8" maxlength="4000" autocomplete="off"></textarea>
           <!-- Image preview -->
           <div id="carta-img-preview" class="carta-img-preview hidden">
             <img id="carta-img-thumb" class="carta-img-thumb" src="" alt="adjunto"/>
@@ -858,6 +856,49 @@
   </div>
 
   <!-- Image Lightbox (created dynamically in JS) -->
+
+  <!-- Calendario Compartido -->
+  <div id="reminders-modal" class="cartas-overlay hidden" role="dialog" aria-modal="true" aria-label="Recordatorios">
+    <div class="cartas-vintage-container" style="max-height:85dvh;">
+      <div class="cartas-vintage-header">
+        <span class="material-symbols-outlined cartas-header-icon" style="font-variation-settings:'FILL' 1;">alarm</span>
+        <h1 class="cartas-vintage-title">Recordatorios</h1>
+        <button type="button" id="reminders-close-btn" class="cartas-close-btn" aria-label="Cerrar">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="reminders-tabs">
+        <button type="button" id="reminders-tab-active" class="cartas-vintage-tab active">Pendientes <span id="reminders-active-badge" class="cartas-tab-badge hidden"></span></button>
+        <button type="button" id="reminders-tab-done" class="cartas-vintage-tab">Completados</button>
+      </div>
+      <div id="reminders-list" class="reminders-list"></div>
+      <button type="button" id="reminders-add-btn" class="cartas-new-btn" style="margin:12px 20px;">
+        <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">add</span> Nuevo recordatorio
+      </button>
+    </div>
+  </div>
+
+  <!-- Add Reminder Modal -->
+  <div id="reminder-modal" class="cartas-overlay hidden" role="dialog" aria-modal="true" aria-label="Agregar recordatorio">
+    <div class="event-modal-content">
+      <h3 class="event-modal-title">Nuevo recordatorio</h3>
+      <input type="text" id="reminder-title-input" class="event-input" placeholder="¿Qué recordar?" maxlength="80" autocomplete="off"/>
+      <input type="datetime-local" id="reminder-datetime-input" class="event-input"/>
+      <select id="reminder-priority-select" class="event-input">
+        <option value="normal">📌 Normal</option>
+        <option value="urgent">🔴 Urgente</option>
+        <option value="low">🔵 Baja prioridad</option>
+      </select>
+      <label class="event-repeat-row">
+        <input type="checkbox" id="reminder-repeat-check"/>
+        <span>Se repite cada día</span>
+      </label>
+      <div class="event-modal-actions">
+        <button type="button" id="reminder-cancel-btn" class="carta-compose-btn cancel">Cancelar</button>
+        <button type="button" id="reminder-save-btn" class="carta-compose-btn send">Guardar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Calendario Compartido -->
   <div id="calendar-modal" class="cartas-overlay hidden" role="dialog" aria-modal="true" aria-label="Calendario compartido">

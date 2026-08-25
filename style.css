@@ -2317,7 +2317,7 @@ body.dark-mode .search-bar input:focus {
 .more-badge.hidden { display: none; }
 .btn-icon { position: relative; }
 
-.more-content { max-width: 420px; }
+.more-content { max-width: 420px; max-height: 80dvh; overflow-y: auto; overscroll-behavior: contain; }
 .more-grid { display: flex; flex-direction: column; gap: 6px; padding: 12px 18px; }
 .more-row {
   display: flex; align-items: center; gap: 14px;
@@ -2467,6 +2467,15 @@ body.dark-mode .search-bar input:focus {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
   border-radius: 12px; pointer-events: none; z-index: 1;
 }
+.carta-compose-heading {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 10px; position: relative; z-index: 2;
+}
+.carta-compose-heading-text {
+  font-family: 'EB Garamond', Georgia, serif;
+  font-size: 16px; font-weight: 600; color: #6c0028;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
 .carta-compose-greeting {
   width: 100%;
   font-family: 'EB Garamond', Georgia, serif;
@@ -2579,37 +2588,6 @@ body.dark-mode .search-bar input:focus {
 body.dark-mode .cartas-stats-btn:hover { background: rgba(255,255,255,0.06); }
 body.dark-mode .cartas-stat { background: var(--bg-card-hover); }
 body.dark-mode .cartas-stat-num { color: #ffb2be; }
-
-/* ============================================
-   TEMPLATES ROW
-   ============================================ */
-.carta-templates-row {
-  margin-bottom: 14px; position: relative; z-index: 2;
-}
-.carta-templates-label {
-  display: block; font-family: 'Manrope', sans-serif;
-  font-size: 11px; font-weight: 600; color: #574144;
-  text-transform: uppercase; letter-spacing: 0.05em;
-  margin-bottom: 8px;
-}
-.carta-templates-scroll {
-  display: flex; gap: 6px; overflow-x: auto;
-  padding-bottom: 4px; scrollbar-width: none;
-}
-.carta-templates-scroll::-webkit-scrollbar { display: none; }
-.carta-template-btn {
-  flex-shrink: 0; padding: 6px 12px;
-  background: var(--bg-card-hover, #ebe8e2);
-  border: 1px solid var(--border-color, #e6e2dc);
-  border-radius: 20px; cursor: pointer;
-  font-family: 'Manrope', sans-serif;
-  font-size: 12px; color: var(--color-text-main, #1c1c18);
-  white-space: nowrap;
-  transition: all var(--transition-fast, 0.15s);
-}
-.carta-template-btn:hover { border-color: #6c0028; color: #6c0028; }
-body.dark-mode .carta-template-btn { background: var(--bg-card-hover); border-color: var(--border-color); color: var(--color-text-main); }
-body.dark-mode .carta-template-btn:hover { border-color: #ffb2be; color: #ffb2be; }
 
 /* ============================================
    IMAGE PREVIEW IN COMPOSE
@@ -3273,6 +3251,53 @@ body.dark-mode .event-input { background: var(--bg-card-hover); border-color: va
 /* ============================================
    DETAILED STATISTICS
    ============================================ */
+.reminders-list {
+  flex: 1; overflow-y: auto; padding: 8px 20px;
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 400px;
+}
+.reminder-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; border-radius: 12px;
+  background: var(--bg-card-hover, #ebe8e2);
+  border: 1px solid var(--border-color, #e6e2dc);
+  transition: background var(--transition-fast);
+}
+.reminder-card:hover { background: #d1cdc6; }
+.reminder-card.done { opacity: 0.55; }
+.reminder-card.urgent { border-left: 3px solid #ef4444; }
+.reminder-card.normal { border-left: 3px solid #6c0028; }
+.reminder-card.low { border-left: 3px solid #3b82f6; }
+.reminder-check {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid var(--border-color, #c4bfb8);
+  background: none; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+  margin-top: 1px;
+}
+.reminder-check:hover { border-color: #6c0028; }
+.reminder-check.checked { background: #6c0028; border-color: #6c0028; }
+.reminder-check.checked::after { content: '✓'; color: #fff; font-size: 12px; font-weight: 700; }
+.reminder-info { flex: 1; min-width: 0; }
+.reminder-title { font-weight: 600; font-size: 14px; color: var(--color-text-main); }
+.reminder-card.done .reminder-title { text-decoration: line-through; }
+.reminder-time { font-size: 11px; color: var(--color-text-muted); margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+.reminder-time.overdue { color: #ef4444; font-weight: 600; }
+.reminder-del {
+  width: 26px; height: 26px; border-radius: 50%; border: none;
+  background: none; cursor: pointer; color: var(--color-text-muted);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; transition: all var(--transition-fast); flex-shrink: 0;
+}
+.reminder-del:hover { background: #fee2e2; color: #ef4444; }
+body.dark-mode .reminder-card { background: var(--bg-card-hover); border-color: var(--border-color); }
+body.dark-mode .reminder-card:hover { background: var(--bg-card); }
+body.dark-mode .reminder-check { border-color: var(--border-color); }
+
+/* ============================================
+   DETAILED STATISTICS
+   ============================================ */
 .stats-scroll {
   flex: 1; overflow-y: auto; padding: 12px 20px calc(16px + var(--safe-b, 0px));
 }
@@ -3303,7 +3328,7 @@ body.dark-mode .event-input { background: var(--bg-card-hover); border-color: va
 }
 .stats-chart {
   width: 100%; height: auto; border-radius: 10px;
-  background: var(--bg-card-hover, #f5f3ef);
+  background: #fffdf7; border: 1px solid var(--border-color, #e6e2dc);
 }
 .stats-top-days { display: flex; flex-direction: column; gap: 6px; }
 .stats-top-day {
@@ -3320,7 +3345,7 @@ body.dark-mode .event-input { background: var(--bg-card-hover); border-color: va
 .stats-top-day-count { font-weight: 700; color: #6c0028; min-width: 24px; text-align: right; }
 body.dark-mode .stats-summary-card { background: var(--bg-card-hover); }
 body.dark-mode .stats-summary-num { color: #ffb2be; }
-body.dark-mode .stats-chart { background: var(--bg-card-hover); }
+body.dark-mode .stats-chart { background: #1a2332; border-color: var(--border-color); }
 body.dark-mode .stats-top-day { background: var(--bg-card-hover); }
 
 /* ============================================
