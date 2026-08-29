@@ -1489,30 +1489,32 @@ function toggleSearch() {
 function filterMessages(q) {
   if (!el.messagesContainer) return;
   var allWrappers = el.messagesContainer.querySelectorAll('.message-wrapper');
-  allWrappers.forEach(function(w) { w.style.display = ''; w.classList.remove('search-highlight'); });
+  allWrappers.forEach(function(w) {
+    w.classList.remove('search-highlight', 'search-active');
+    w.style.display = '';
+  });
   allWrappers.forEach(function(w) {
     w.querySelectorAll('.search-match').forEach(function(m) {
       m.outerHTML = m.textContent;
     });
   });
-  if (!q) { updateSearchCount(0, 0); return; }
+  if (!q) { updateSearchCount(0, 0); el._searchMatches = []; el._searchIndex = 0; return; }
   var matches = [];
   allWrappers.forEach(function(w) {
     var text = (w.textContent || '').toLowerCase();
-    var query = q.toLowerCase();
-    if (text.indexOf(query) >= 0) { matches.push(w); }
-    else { w.style.display = 'none'; }
+    if (text.indexOf(q.toLowerCase()) >= 0) { matches.push(w); }
   });
   matches.forEach(function(w) {
     highlightTextInElement(w, q);
     w.classList.add('search-highlight');
   });
-  updateSearchCount(matches.length > 0 ? 1 : 0, matches.length);
-  if (matches.length > 0) {
-    matches[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
   el._searchMatches = matches;
   el._searchIndex = 0;
+  if (matches.length > 0) {
+    matches[0].classList.add('search-active');
+    matches[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  updateSearchCount(matches.length > 0 ? 1 : 0, matches.length);
 }
 function highlightTextInElement(el, query) {
   var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
@@ -1528,7 +1530,6 @@ function highlightTextInElement(el, query) {
     var after = text.substring(idx + query.length);
     var span = document.createElement('span');
     span.className = 'search-match';
-    span.style.cssText = 'background:#fbbf24;color:#000;padding:0 1px;border-radius:2px;';
     span.textContent = match;
     var parent = node.parentNode;
     if (before) parent.insertBefore(document.createTextNode(before), node);
@@ -1539,7 +1540,7 @@ function highlightTextInElement(el, query) {
 }
 function updateSearchCount(current, total) {
   var existing = el.searchBar ? el.searchBar.querySelector('.search-count') : null;
-  if (total === 0) { if (existing) existing.remove(); return; }
+  if (total === 0) { if (existing) existing.textContent = '0/0'; return; }
   if (!existing) {
     existing = document.createElement('span');
     existing.className = 'search-count';
@@ -1549,14 +1550,20 @@ function updateSearchCount(current, total) {
 }
 function searchNext() {
   if (!el._searchMatches || el._searchMatches.length === 0) return;
+  el._searchMatches[el._searchIndex].classList.remove('search-active');
   el._searchIndex = (el._searchIndex + 1) % el._searchMatches.length;
-  el._searchMatches[el._searchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  var cur = el._searchMatches[el._searchIndex];
+  cur.classList.add('search-active');
+  cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
   updateSearchCount(el._searchIndex + 1, el._searchMatches.length);
 }
 function searchPrev() {
   if (!el._searchMatches || el._searchMatches.length === 0) return;
+  el._searchMatches[el._searchIndex].classList.remove('search-active');
   el._searchIndex = (el._searchIndex - 1 + el._searchMatches.length) % el._searchMatches.length;
-  el._searchMatches[el._searchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  var cur = el._searchMatches[el._searchIndex];
+  cur.classList.add('search-active');
+  cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
   updateSearchCount(el._searchIndex + 1, el._searchMatches.length);
 }
 function openLightbox(src, allImages, curIdx) {
@@ -2994,34 +3001,6 @@ function exportChatTxt() {
   setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
   showSuccess('Chat exportado (.TXT)');
 }
-function exportChatPdf() {
-  if (!allMessages.length) { showError('No hay mensajes para exportar'); return; }
-  var rows = allMessages.map(function(m) {
-    var d = new Date(m.timestamp || Date.now());
-    var stamp = d.toLocaleDateString('es-ES') + ' ' + formatTime(m.timestamp);
-    var body = escapeHtml(getPlainText(m));
-    var tags = [];
-    if (m.imageBase64) tags.push('<em>[Imagen]</em>');
-    if (m.imageGifUrl) tags.push('<em>[GIF]</em>');
-    if (m.audioBase64) tags.push('<em>[Audio]</em>');
-    if (tags.length) body += ' ' + tags.join(' ');
-    return '<tr><td class="t">' + escapeHtml(stamp) + '</td><td class="a">' + escapeHtml(m.autor || '?') + '</td><td>' + body + '</td></tr>';
-  }).join('');
-  var w = window.open('', '_blank');
-  if (!w) { showError('Permití ventanas emergentes para imprimir'); return; }
-  w.document.write(
-    '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Chat Pareja — Conversación</title>' +
-    '<style>body{font-family:Segoe UI,Arial,sans-serif;margin:28px;color:#111}h1{font-size:20px}table{width:100%;border-collapse:collapse;font-size:13px}' +
-    'td{border-bottom:1px solid #e5e7eb;padding:7px 8px;vertical-align:top}td.t{white-space:nowrap;color:#667;width:130px}td.a{white-space:nowrap;font-weight:700;width:90px}' +
-    '@media print{.noprint{display:none}}</style></head><body>' +
-    '<h1>💕 Chat Pareja</h1><p>Exportado: ' + new Date().toLocaleString('es-ES') + '</p>' +
-    '<table>' + rows + '</table>' +
-    '<p class="noprint" style="margin-top:22px"><button onclick="window.print()" style="padding:10px 18px;font-size:14px">Imprimir / Guardar como PDF</button></p>' +
-    '<script>window.addEventListener("load",function(){setTimeout(function(){window.print()},400)})<\/script>' +
-    '</body></html>'
-  );
-  w.document.close();
-}
 
 /* ============================================
    GIFS GIPHY (clave propia guardada localmente)
@@ -3262,7 +3241,6 @@ document.addEventListener('DOMContentLoaded', function() {
     e2eeSaveBtn: document.getElementById('e2ee-save-btn'),
     e2eeDisableBtn: document.getElementById('e2ee-disable-btn'),
     exportTxtBtn: document.getElementById('export-txt-btn'),
-    exportPdfBtn: document.getElementById('export-pdf-btn'),
     moreBtn: document.getElementById('more-btn'),
     moreBadge: document.getElementById('more-badge'),
     moreModal: document.getElementById('more-modal'),
@@ -3485,7 +3463,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
   /* EXPORT */
   if (el.exportTxtBtn) el.exportTxtBtn.addEventListener('click', exportChatTxt);
-  if (el.exportPdfBtn) el.exportPdfBtn.addEventListener('click', exportChatPdf);
 
   /* FORCE REFRESH */
   var forceRefreshBtn = document.getElementById('force-refresh-btn');
