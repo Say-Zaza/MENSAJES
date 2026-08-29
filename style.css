@@ -1871,7 +1871,6 @@ body.dark-mode .viewonce-label { color: var(--color-text-muted); }
 .settings-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 20px 24px 16px; border-bottom: 1px solid var(--border-color);
-  position: sticky; top: 0; background: white; z-index: 1;
 }
 .settings-header h2 { font-size: 1.1rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .settings-header h2 svg { width: 20px; height: 20px; color: var(--color-text-muted); }
