@@ -3604,11 +3604,6 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.profileSaveBtn) el.profileSaveBtn.addEventListener('click', saveProfile);
   if (el.profileCancelBtn) el.profileCancelBtn.addEventListener('click', updateMyProfileUI);
   if (el.profileAvatar) el.profileAvatar.addEventListener('click', function(e) {
-    if (myProfile.avatarBase64) {
-      e.stopPropagation();
-      openLightbox(myProfile.avatarBase64);
-      return;
-    }
     if (el.profileAvatarInput) el.profileAvatarInput.click();
   });
   if (el.profileAvatarInput) el.profileAvatarInput.addEventListener('change', function(e) {
@@ -3616,6 +3611,7 @@ document.addEventListener('DOMContentLoaded', function() {
     resizeAvatarForProfile(e.target.files[0]).then(function(dataUrl) {
       myProfile.avatarBase64 = dataUrl;
       updateMyProfileUI();
+      e.target.value = '';
     });
   });
   if (el.partnerProfileAvatar) el.partnerProfileAvatar.addEventListener('click', function() {
