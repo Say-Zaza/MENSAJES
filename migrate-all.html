@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Migrar perfiles</title>
+<style>body{font-family:sans-serif;padding:40px;background:#111;color:#eee}pre{background:#222;padding:16px;border-radius:8px;max-height:70vh;overflow:auto;font-size:13px}button{padding:12px 24px;font-size:16px;border:none;border-radius:8px;cursor:pointer;margin:8px 4px;background:#00a884;color:#fff}#log{margin-top:20px}input{padding:8px;font-size:14px;border-radius:6px;border:1px solid #444;background:#222;color:#eee;margin:4px;width:300px}</style>
+</head><body>
+<h2>Migrar perfiles + borrar textos</h2>
+<p>Contraseña del viejo:</p>
+<input id="pw" type="password" placeholder="Contraseña" />
+<button id="btn" onclick="start()">Migrar perfiles y borrar textos</button>
+<div id="log"><pre id="output">Esperando...
+</pre></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script>
+var OLD_KEY = "AIzaSyALVjHZtbEJGAx2pswt4l4h654ieGJw_tk";
+var OLD_PROJECT = "mensajes-31f68";
+var EMAIL = "hombre@chatpareja.app";
+
+var newApp = firebase.initializeApp({
+  apiKey: "AIzaSyDiawpwZcAucYTqWDbqm04ydGqOJOzdY9M",
+  authDomain: "race-master-3d-ee76f.firebaseapp.com",
+  projectId: "race-master-3d-ee76f",
+  storageBucket: "race-master-3d-ee76f.firebasestorage.app"
+}, "new");
+var newDb = firebase.firestore(newApp);
+var newAuth = firebase.auth(newApp);
+
+function log(msg) {
+  document.getElementById('output').textContent += msg + '\n';
+  document.getElementById('output').scrollTop = 99999;
+}
+
+async function signInOld(pw) {
+  var res = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + OLD_KEY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: EMAIL, password: pw, returnSecureToken: true })
+  });
+  var data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.idToken;
+}
+
+async function fetchAll(token, path) {
+  var all = [];
+  var pageToken = '';
+  do {
+    var url = 'https://firestore.googleapis.com/v1/projects/' + OLD_PROJECT + '/databases/(default)/documents/' + path + '?pageSize=500' + (pageToken ? '&pageToken=' + pageToken : '');
+    var res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    var data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    if (data.documents) {
+      data.documents.forEach(function(doc) {
+        var f = doc.fields || {};
+        var fields = {};
+        for (var k in f) {
+          var v = f[k];
+          if (v.stringValue !== undefined) fields[k] = v.stringValue;
+          else if (v.integerValue !== undefined) fields[k] = parseInt(v.integerValue);
+          else if (v.doubleValue !== undefined) fields[k] = parseFloat(v.doubleValue);
+          else if (v.booleanValue !== undefined) fields[k] = v.booleanValue;
+          else if (v.timestampValue !== undefined) fields[k] = v.timestampValue;
+          else if (v.arrayValue !== undefined) {
+            fields[k] = (v.arrayValue.values || []).map(function(item) {
+              if (item.stringValue !== undefined) return item.stringValue;
+              if (item.integerValue !== undefined) return parseInt(item.integerValue);
+              if (item.doubleValue !== undefined) return parseFloat(item.doubleValue);
+              if (item.booleanValue !== undefined) return item.booleanValue;
+              if (item.mapValue !== undefined) {
+                var mf2 = item.mapValue.fields || {};
+                var obj2 = {};
+                for (var mk2 in mf2) {
+                  var mv2 = mf2[mk2];
+                  if (mv2.stringValue !== undefined) obj2[mk2] = mv2.stringValue;
+                  else if (mv2.integerValue !== undefined) obj2[mk2] = parseInt(mv2.integerValue);
+                  else obj2[mk2] = null;
+                }
+                return obj2;
+              }
+              return null;
+            });
+          }
+          else if (v.mapValue !== undefined) {
+            var mf = v.mapValue.fields || {};
+            var obj = {};
+            for (var mk in mf) {
+              var mv = mf[mk];
+              if (mv.stringValue !== undefined) obj[mk] = mv.stringValue;
+              else if (mv.integerValue !== undefined) obj[mk] = parseInt(mv.integerValue);
+              else if (mv.doubleValue !== undefined) obj[mk] = parseFloat(mv.doubleValue);
+              else if (mv.booleanValue !== undefined) obj[mk] = mv.booleanValue;
+              else if (mv.timestampValue !== undefined) obj[mk] = mv.timestampValue;
+              else if (mv.arrayValue !== undefined) {
+                obj[mk] = (mv.arrayValue.values || []).map(function(it) {
+                  if (it.stringValue !== undefined) return it.stringValue;
+                  if (it.integerValue !== undefined) return parseInt(it.integerValue);
+                  return null;
+                });
+              }
+              else obj[mk] = null;
+            }
+            fields[k] = obj;
+          }
+          else if (v.nullValue !== undefined) fields[k] = null;
+        }
+        all.push({ id: doc.name.split('/').pop(), data: fields });
+      });
+    }
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  return all;
+}
+
+async function start() {
+  var pw = document.getElementById('pw').value;
+  if (!pw) { log('Poné la contraseña'); return; }
+  document.getElementById('btn').disabled = true;
+
+  try {
+    log('Authenticando viejo...');
+    var token = await signInOld(pw);
+    log('OK viejo');
+
+    log('Login nuevo...');
+    await newAuth.signInWithEmailAndPassword(EMAIL, 'ISIS3003');
+    log('OK nuevo');
+
+    log('Migrando users...');
+    var users = await fetchAll(token, 'rooms/general/users');
+    log('Users: ' + users.length);
+    for (var i = 0; i < users.length; i++) {
+      await newDb.collection('rooms/general/users').doc(users[i].id).set(users[i].data);
+      log('User ' + users[i].id + ' OK');
+    }
+
+    log('Migrando pairing...');
+    var pairings = await fetchAll(token, 'rooms/general/pairing');
+    for (var p of pairings) {
+      await newDb.collection('rooms/general/pairing').doc(p.id).set(p.data);
+    }
+    log('Pairing: ' + pairings.length);
+
+    log('Migrando destacados...');
+    var destItems = await fetchAll(token, 'rooms/general/destacados/user1/items');
+    var batch = newDb.batch();
+    destItems.forEach(function(d) { batch.set(newDb.collection('rooms/general/destacados/user1/items').doc(d.id), d.data); });
+    if (destItems.length > 0) await batch.commit();
+    var destItems2 = await fetchAll(token, 'rooms/general/destacados/user2/items');
+    var batch2 = newDb.batch();
+    destItems2.forEach(function(d) { batch2.set(newDb.collection('rooms/general/destacados/user2/items').doc(d.id), d.data); });
+    if (destItems2.length > 0) await batch2.commit();
+    log('Destacados user1: ' + destItems.length + ' | user2: ' + destItems2.length);
+
+    log('Borrando textos...');
+    var msgs = await fetchAll(token, 'rooms/general/messages');
+    var textIds = [];
+    msgs.forEach(function(m) {
+      if (!m.data.imageBase64 && !m.data.audioBase64) textIds.push(m.id);
+    });
+    log('Textos a borrar: ' + textIds.length);
+    for (var i = 0; i < textIds.length; i += 500) {
+      var batch = newDb.batch();
+      var chunk = textIds.slice(i, i + 500);
+      chunk.forEach(function(id) { batch.delete(newDb.collection('rooms/general/messages').doc(id)); });
+      await batch.commit();
+    }
+
+    log('\nTODO MIGRADO + TEXTOS BORRADOS');
+  } catch(e) {
+    log('ERROR: ' + e.message);
+  }
+  document.getElementById('btn').disabled = false;
+}
+</script>
+</body></html>

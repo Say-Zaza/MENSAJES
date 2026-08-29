@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Borrar textos</title>
+<style>body{font-family:sans-serif;padding:40px;background:#111;color:#eee}pre{background:#222;padding:16px;border-radius:8px;max-height:70vh;overflow:auto;font-size:13px}button{padding:12px 24px;font-size:16px;border:none;border-radius:8px;cursor:pointer;margin:8px 4px;background:#ef4444;color:#fff}#log{margin-top:20px}</style>
+</head><body>
+<h2>Borrar mensajes de texto</h2>
+<p>Esto borrará todos los mensajes de texto. Quedan solo audios y fotos.</p>
+<button id="btn" onclick="start()">Borrar textos</button>
+<div id="log"><pre id="output">Esperando...
+</pre></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script>
+var app = firebase.initializeApp({
+  apiKey: "AIzaSyDiawpwZcAucYTqWDbqm04ydGqOJOzdY9M",
+  authDomain: "race-master-3d-ee76f.firebaseapp.com",
+  projectId: "race-master-3d-ee76f",
+  storageBucket: "race-master-3d-ee76f.firebasestorage.app"
+});
+var db = firebase.firestore();
+var auth = firebase.auth();
+
+function log(msg) {
+  document.getElementById('output').textContent += msg + '\n';
+  document.getElementById('output').scrollTop = 99999;
+}
+
+async function start() {
+  document.getElementById('btn').disabled = true;
+  try {
+    log('Login...');
+    await auth.signInWithEmailAndPassword('hombre@chatpareja.app', 'ISIS3003');
+    log('OK');
+
+    log('Leyendo mensajes...');
+    var snap = await db.collection('rooms/general/messages').get();
+    var toDelete = [];
+    snap.forEach(function(doc) {
+      var d = doc.data();
+      if (d.texto && !d.imageBase64 && !d.audioBase64) {
+        toDelete.push(doc.id);
+      }
+    });
+    log('Total: ' + snap.size + ' | Texto a borrar: ' + toDelete.length);
+
+    for (var i = 0; i < toDelete.length; i += 500) {
+      var batch = db.batch();
+      var chunk = toDelete.slice(i, i + 500);
+      chunk.forEach(function(id) {
+        batch.delete(db.collection('rooms/general/messages').doc(id));
+      });
+      await batch.commit();
+      log('Borrados: ' + Math.min(i + 500, toDelete.length) + '/' + toDelete.length);
+    }
+
+    log('LISTO - Solo quedan audios y fotos');
+  } catch(e) {
+    log('ERROR: ' + e.message);
+  }
+  document.getElementById('btn').disabled = false;
+}
+</script>
+</body></html>
