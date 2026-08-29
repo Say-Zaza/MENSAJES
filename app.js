@@ -711,6 +711,26 @@ function compressImageToBase64(file) {
     reader.readAsDataURL(file);
   });
 }
+function resizeAvatarForProfile(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var img = new Image();
+      img.onload = function() {
+        var MAX = 400, w = img.width, h = img.height;
+        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = function() { reject(new Error('Error loading image')); };
+      img.src = ev.target.result;
+    };
+    reader.onerror = function() { reject(new Error('Error reading file')); };
+    reader.readAsDataURL(file);
+  });
+}
 function resizeImageForFirestore(base64Src) {
   return new Promise(function(resolve, reject) {
     var img = new Image();
@@ -3593,9 +3613,10 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   if (el.profileAvatarInput) el.profileAvatarInput.addEventListener('change', function(e) {
     if (!e.target.files || !e.target.files[0]) return;
-    var reader = new FileReader();
-    reader.onload = function(ev) { myProfile.avatarBase64 = ev.target.result; updateMyProfileUI(); };
-    reader.readAsDataURL(e.target.files[0]);
+    resizeAvatarForProfile(e.target.files[0]).then(function(dataUrl) {
+      myProfile.avatarBase64 = dataUrl;
+      updateMyProfileUI();
+    });
   });
   if (el.partnerProfileAvatar) el.partnerProfileAvatar.addEventListener('click', function() {
     var av = partnerProfile.avatarBase64;
