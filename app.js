@@ -1,11 +1,11 @@
 /* FIREBASE CONFIG */
 var firebaseConfig = {
-  apiKey: "AIzaSyALVjHZtbEJGAx2pswt4l4h654ieGJw_tk",
-  authDomain: "mensajes-31f68.firebaseapp.com",
-  projectId: "mensajes-31f68",
-  storageBucket: "mensajes-31f68.firebasestorage.app",
-  messagingSenderId: "832362257221",
-  appId: "1:832362257221:web:7a0115d52319375c743c2c"
+  apiKey: "AIzaSyDiawpwZcAucYTqWDbqm04ydGqOJOzdY9M",
+  authDomain: "race-master-3d-ee76f.firebaseapp.com",
+  projectId: "race-master-3d-ee76f",
+  storageBucket: "race-master-3d-ee76f.firebasestorage.app",
+  messagingSenderId: "357557800287",
+  appId: "1:357557800287:web:c4ef1b0b3a5854a55abaea"
 };
 firebase.initializeApp(firebaseConfig);
 var db = firebase.firestore();
