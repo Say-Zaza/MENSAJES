@@ -465,7 +465,7 @@ function handleTypingInput() {
 function startPresenceHeartbeat() {
   if (!currentUser) return;
   var ref = db.collection(USERS_COLLECTION).doc(currentUser.uid);
-  ref.set({ online: true, lastSeen: firebase.firestore.FieldValue.serverTimestamp(), uid: currentUser.uid, username: username || '' }, { merge: true }).catch(function(){});
+  ref.set({ online: true, lastSeen: firebase.firestore.FieldValue.serverTimestamp(), uid: currentUser.uid, username: username || '', email: currentUser.email }, { merge: true }).catch(function(){});
   presenceHeartbeatInterval = setInterval(function() {
     ref.update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp(), online: true }).catch(function(){});
   }, PRESENCE_HEARTBEAT_MS);
@@ -1858,9 +1858,21 @@ function toggleEmojiPicker() {
 function loadMyProfile() {
   if (!currentUser) return;
   db.collection(USERS_COLLECTION).doc(currentUser.uid).get().then(function(doc) {
-    if (doc.exists) { var d = doc.data(); myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' }; }
-    if (myProfile.username) username = myProfile.username;
-    updateMyProfileUI();
+    if (doc.exists) {
+      var d = doc.data(); myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
+      if (myProfile.username) username = myProfile.username;
+      updateMyProfileUI();
+    } else {
+      db.collection(USERS_COLLECTION).where('email', '==', currentUser.email).limit(1).get().then(function(snap) {
+        if (!snap.empty) {
+          var d = snap.docs[0].data();
+          myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
+          if (myProfile.username) username = myProfile.username;
+          db.collection(USERS_COLLECTION).doc(currentUser.uid).set(myProfile, { merge: true }).catch(function(){});
+        }
+        updateMyProfileUI();
+      }).catch(function(){ updateMyProfileUI(); });
+    }
   }).catch(function(){});
 }
 function loadPartnerProfile() {
@@ -1872,7 +1884,19 @@ function loadPartnerProfile() {
       var d = snap.docs[0].data();
       partnerProfile = { username: d.username || partner.name, avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
     }
-    else { partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; }
+    else {
+      db.collection(USERS_COLLECTION).where('email', '==', partner.email).limit(1).get().then(function(snap2) {
+        if (!snap2.empty) {
+          var d2 = snap2.docs[0].data();
+          partnerProfile = { username: d2.username || partner.name, avatarBase64: d2.avatarBase64 || '', bio: d2.bio || '' };
+          partnerRealUid = snap2.docs[0].id;
+        } else {
+          partnerProfile = { username: partner.name, avatarBase64: '', bio: '' };
+        }
+        updateMyProfileUI(); updatePartnerProfileUI(); updateHeaderBadge(null);
+      }).catch(function(){ partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; updateMyProfileUI(); updatePartnerProfileUI(); });
+      return;
+    }
     updateMyProfileUI(); updatePartnerProfileUI(); updateHeaderBadge(null);
   }).catch(function(){ partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; updateMyProfileUI(); updatePartnerProfileUI(); });
 }
