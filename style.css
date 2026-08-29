@@ -2522,7 +2522,7 @@ body.dark-mode .search-bar input:focus {
    ============================================ */
 .cartas-compose-wrap { padding: 12px 20px 0; flex-shrink: 0; }
 .cartas-new-btn {
-  width: 100%; padding: 12px;
+  width: calc(100% - 40px); margin: 12px 20px; padding: 12px;
   background: var(--primary-accent); color: #fff;
   border: none; border-radius: 12px;
   font-family: 'Manrope', sans-serif;
@@ -2531,6 +2531,7 @@ body.dark-mode .search-bar input:focus {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   transition: opacity var(--transition-fast, 0.15s), filter var(--transition-fast, 0.15s);
   box-shadow: 0 4px 12px rgba(0,168,132,0.25);
+  box-sizing: border-box;
 }
 .cartas-new-btn:hover { filter: brightness(1.08); }
 .cartas-new-btn .material-symbols-outlined { font-size: 18px; }
