@@ -1794,6 +1794,7 @@ function showImagePreviewModal(files) {
     reader.readAsDataURL(file);
   });
   el.imagePreviewModal.style.display = 'flex';
+  showImageChip(pendingImagePreviews[0] || '');
 }
 function hideImagePreviewModal() {
   pendingImageFiles = []; pendingImagePreviews = []; pendingViewOnce = false;
@@ -1801,6 +1802,17 @@ function hideImagePreviewModal() {
   if (el.imagePreviewContainer) el.imagePreviewContainer.innerHTML = '';
   if (el.imageCaptionInput) el.imageCaptionInput.value = '';
   if (el.previewViewOnceBtn) { el.previewViewOnceBtn.classList.remove('active'); el.previewViewOnceBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">visibility</span> Ver una vez'; }
+  hideImageChip();
+}
+function showImageChip(src) {
+  var chip = document.getElementById('image-chip-preview');
+  var thumb = document.getElementById('image-chip-thumb');
+  if (!chip || !thumb) return;
+  if (src) { thumb.src = src; chip.classList.remove('hidden'); }
+}
+function hideImageChip() {
+  var chip = document.getElementById('image-chip-preview');
+  if (chip) chip.classList.add('hidden');
 }
 function sendPendingImages() {
   if (pendingImageFiles.length === 0) return;
@@ -3413,6 +3425,10 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.previewCancelBtn) el.previewCancelBtn.addEventListener('click', hideImagePreviewModal);
   if (el.previewCloseBtn) el.previewCloseBtn.addEventListener('click', hideImagePreviewModal);
 
+  /* IMAGE CHIP REMOVE */
+  var chipRemoveBtn = document.getElementById('image-chip-remove');
+  if (chipRemoveBtn) chipRemoveBtn.addEventListener('click', function() { hideImagePreviewModal(); hideImageChip(); });
+
   /* VOICE */
   var voiceTimer = null;
   if (el.voiceBtn) {
@@ -3470,6 +3486,31 @@ document.addEventListener('DOMContentLoaded', function() {
   /* EXPORT */
   if (el.exportTxtBtn) el.exportTxtBtn.addEventListener('click', exportChatTxt);
   if (el.exportPdfBtn) el.exportPdfBtn.addEventListener('click', exportChatPdf);
+
+  /* FORCE REFRESH */
+  var forceRefreshBtn = document.getElementById('force-refresh-btn');
+  if (forceRefreshBtn) forceRefreshBtn.addEventListener('click', function() {
+    if ('caches' in window) {
+      caches.keys().then(function(names) {
+        return Promise.all(names.map(function(n) { return caches.delete(n); }));
+      }).then(function() {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            return Promise.all(regs.map(function(r) { return r.unregister(); }));
+          }).then(function() { location.reload(true); });
+        } else { location.reload(true); }
+      });
+    } else { location.reload(true); }
+  });
+
+  /* SPLASH ENTER */
+  var splashEnterBtn = document.getElementById('splash-enter-btn');
+  var splashScreen = document.getElementById('splash-screen');
+  if (splashEnterBtn && splashScreen) {
+    splashEnterBtn.addEventListener('click', function() {
+      setTimeout(function() { splashScreen.classList.add('hidden'); }, 4000);
+    });
+  }
 
   /* SEARCH */
   if (el.searchToggleBtn) el.searchToggleBtn.addEventListener('click', toggleSearch);
