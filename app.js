@@ -1965,13 +1965,30 @@ function saveProfile() {
   var bio = el.profileBioInput ? el.profileBioInput.value.trim() : '';
   myProfile.username = name; myProfile.bio = bio;
   if (name) username = name;
-  db.collection(USERS_COLLECTION).doc(currentUser.uid).set({
-    username: name, bio: bio, avatarBase64: myProfile.avatarBase64,
+  var profileData = {
+    username: name, bio: bio,
     uid: currentUser.uid, email: currentUser.email,
     lastActive: firebase.firestore.FieldValue.serverTimestamp()
-  }, { merge: true }).then(function() {
+  };
+  if (myProfile.avatarBase64 && myProfile.avatarBase64.length < 900000) {
+    profileData.avatarBase64 = myProfile.avatarBase64;
+  }
+  db.collection(USERS_COLLECTION).doc(currentUser.uid).set(profileData, { merge: true }).then(function() {
     showSuccess('Perfil guardado');
-  }).catch(function(){ showError('Error al guardar perfil'); });
+  }).catch(function(e) {
+    console.error('Profile save error:', e);
+    var fallback = {
+      username: name, bio: bio,
+      uid: currentUser.uid, email: currentUser.email,
+      lastActive: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    db.collection(USERS_COLLECTION).doc(currentUser.uid).set(fallback, { merge: true }).then(function() {
+      showSuccess('Perfil guardado (sin foto)');
+    }).catch(function(e2) {
+      console.error('Profile save fallback error:', e2);
+      showError('Error al guardar perfil');
+    });
+  });
 }
 
 
