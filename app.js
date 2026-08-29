@@ -717,12 +717,12 @@ function resizeAvatarForProfile(file) {
     reader.onload = function(ev) {
       var img = new Image();
       img.onload = function() {
-        var MAX = 400, w = img.width, h = img.height;
+        var MAX = 800, w = img.width, h = img.height;
         if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
         var c = document.createElement('canvas');
         c.width = w; c.height = h;
         c.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve(c.toDataURL('image/jpeg', 0.85));
+        resolve(c.toDataURL('image/jpeg', 0.95));
       };
       img.onerror = function() { reject(new Error('Error loading image')); };
       img.src = ev.target.result;
