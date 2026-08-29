@@ -3604,6 +3604,13 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.profileSaveBtn) el.profileSaveBtn.addEventListener('click', saveProfile);
   if (el.profileCancelBtn) el.profileCancelBtn.addEventListener('click', updateMyProfileUI);
   if (el.profileAvatar) el.profileAvatar.addEventListener('click', function(e) {
+    if (myProfile.avatarBase64) {
+      openLightbox(myProfile.avatarBase64);
+    }
+  });
+  var camBtn = document.getElementById('profile-avatar-camera-btn');
+  if (camBtn) camBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
     if (el.profileAvatarInput) el.profileAvatarInput.click();
   });
   if (el.profileAvatarInput) el.profileAvatarInput.addEventListener('change', function(e) {
