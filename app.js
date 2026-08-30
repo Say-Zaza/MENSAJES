@@ -1893,7 +1893,8 @@ function loadMyProfile() {
           var d = snap.docs[0].data();
           myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
           if (myProfile.username) username = myProfile.username;
-          db.collection(USERS_COLLECTION).doc(currentUser.uid).set(myProfile, { merge: true }).catch(function(){});
+          var light = { username: myProfile.username, bio: myProfile.bio, email: currentUser.email, uid: currentUser.uid };
+          db.collection(USERS_COLLECTION).doc(currentUser.uid).set(light, { merge: true }).catch(function(){});
         }
         updateMyProfileUI();
       }).catch(function(){ updateMyProfileUI(); });
@@ -1964,29 +1965,22 @@ function saveProfile() {
   var bio = el.profileBioInput ? el.profileBioInput.value.trim() : '';
   myProfile.username = name; myProfile.bio = bio;
   if (name) username = name;
-  var profileData = {
+  var base = {
     username: name, bio: bio,
     uid: currentUser.uid, email: currentUser.email,
     lastActive: firebase.firestore.FieldValue.serverTimestamp()
   };
-  if (myProfile.avatarBase64 && myProfile.avatarBase64.length < 900000) {
-    profileData.avatarBase64 = myProfile.avatarBase64;
-  }
-  db.collection(USERS_COLLECTION).doc(currentUser.uid).set(profileData, { merge: true }).then(function() {
+  db.collection(USERS_COLLECTION).doc(currentUser.uid).set(base, { merge: true }).then(function() {
+    if (myProfile.avatarBase64 && myProfile.avatarBase64.length < 900000) {
+      return db.collection(USERS_COLLECTION).doc(currentUser.uid).set({
+        avatarBase64: myProfile.avatarBase64
+      }, { merge: true });
+    }
+  }).then(function() {
     showSuccess('Perfil guardado');
   }).catch(function(e) {
     console.error('Profile save error:', e);
-    var fallback = {
-      username: name, bio: bio,
-      uid: currentUser.uid, email: currentUser.email,
-      lastActive: firebase.firestore.FieldValue.serverTimestamp()
-    };
-    db.collection(USERS_COLLECTION).doc(currentUser.uid).set(fallback, { merge: true }).then(function() {
-      showSuccess('Perfil guardado (sin foto)');
-    }).catch(function(e2) {
-      console.error('Profile save fallback error:', e2);
-      showError('Error al guardar perfil');
-    });
+    showError('Error al guardar perfil');
   });
 }
 
