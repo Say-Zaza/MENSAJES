@@ -313,10 +313,10 @@ function getPartnerConfig() {
   if (!k) return null;
   return k === 'user1' ? ACCOUNTS.user2 : ACCOUNTS.user1;
 }
-var selectedLoginUser = 'user1';
 function tryLoginWithPassword(pw) {
-  var email = ACCOUNTS[selectedLoginUser].email;
-  return auth.signInWithEmailAndPassword(email, pw);
+  return auth.signInWithEmailAndPassword(ACCOUNTS.user1.email, pw).catch(function() {
+    return auth.signInWithEmailAndPassword(ACCOUNTS.user2.email, pw);
+  });
 }
 function showLoginScreen() {
   if (el.loginScreen) { el.loginScreen.style.display = 'flex'; }
@@ -3415,18 +3415,6 @@ document.addEventListener('DOMContentLoaded', function() {
   if (rpi) renderIcon(rpi, 'close');
 
   /* LOGIN */
-  var loginU1 = document.getElementById('login-user1-btn');
-  var loginU2 = document.getElementById('login-user2-btn');
-  if (loginU1) loginU1.addEventListener('click', function() {
-    selectedLoginUser = 'user1';
-    loginU1.classList.add('active');
-    if (loginU2) loginU2.classList.remove('active');
-  });
-  if (loginU2) loginU2.addEventListener('click', function() {
-    selectedLoginUser = 'user2';
-    loginU2.classList.add('active');
-    if (loginU1) loginU1.classList.remove('active');
-  });
   if (el.loginForm) el.loginForm.addEventListener('submit', function(e) {
     e.preventDefault();
     var pw = el.loginPassword ? el.loginPassword.value.trim() : '';
