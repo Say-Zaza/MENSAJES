@@ -2220,6 +2220,16 @@ body.dark-mode .search-bar input:focus {
 .login-header p { color: #6b7280; font-size: 15px; margin: 0 0 28px; }
 .login-form { text-align: left; }
 .login-email-label { display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px; word-break: break-all; }
+.login-user-select { display: flex; gap: 10px; margin-bottom: 18px; }
+.login-user-btn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 12px; border: 2px solid #e5e7eb; border-radius: 12px;
+  background: #fff; color: #6b7280; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: all .2s;
+}
+.login-user-btn:hover { border-color: #9ca3af; }
+.login-user-btn.active { border-color: var(--primary-accent); background: rgba(0,168,132,0.06); color: var(--primary-accent); }
+.login-user-btn .material-symbols-outlined { font-size: 20px; }
 .login-form input[type="password"] {
   width: 100%; padding: 14px 16px; border: 1.5px solid #e5e7eb;
   border-radius: 14px; font-size: 17px; outline: none; margin-bottom: 18px;

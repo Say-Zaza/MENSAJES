@@ -221,6 +221,17 @@
         <h1>I S</h1>
       </div>
       <form id="login-form" class="login-form" onsubmit="return false;">
+        <label class="login-email-label">¿Quién eres?</label>
+        <div class="login-user-select">
+          <button type="button" id="login-user1-btn" class="login-user-btn active" data-user="user1">
+            <span class="material-symbols-outlined">person</span>
+            <span>Él</span>
+          </button>
+          <button type="button" id="login-user2-btn" class="login-user-btn" data-user="user2">
+            <span class="material-symbols-outlined">person</span>
+            <span>Ella</span>
+          </button>
+        </div>
         <label for="login-password" class="login-email-label">Ingresa tu clave</label>
         <input type="password" id="login-password" placeholder="Clave" autocomplete="current-password" maxlength="128" aria-label="Clave">
         <button type="submit" id="login-submit-btn" class="btn-pairing-primary">
