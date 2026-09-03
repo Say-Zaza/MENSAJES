@@ -1832,6 +1832,10 @@ body.dark-mode .image-chip-remove:hover { background: rgba(239,68,68,0.2); }
 .image-caption-input:focus { border-color: var(--primary-accent); }
 body.dark-mode .image-caption-input { background: #1f2c34; color: #fff; border-color: var(--border-color); }
 body.dark-mode .image-caption-input::placeholder { color: var(--color-text-muted); }
+body.dark-mode .image-preview-content { background: #111b21; }
+body.dark-mode .image-preview-header { border-bottom-color: var(--border-color); }
+body.dark-mode .image-preview-header h3 { color: #e9edef; }
+body.dark-mode .image-preview-container { background: #1f2c34; }
 .image-preview-actions {
   display: flex; gap: 10px; padding: 12px 18px 20px;
   border-top: 1px solid var(--border-color);
