@@ -338,6 +338,9 @@ function tryLoginWithPassword(pw) {
 function showLoginScreen() {
   if (el.loginScreen) { el.loginScreen.style.display = 'flex'; }
   if (el.chatContainer) { el.chatContainer.style.display = 'none'; }
+  if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
+  if (el.loginPassword) el.loginPassword.value = '';
+  if (el.loginError) el.loginError.style.display = 'none';
 }
 function hideLoginScreen() {
   if (el.loginScreen) { el.loginScreen.style.display = 'none'; }
@@ -4136,7 +4139,12 @@ document.addEventListener('DOMContentLoaded', function() {
       if (document.hidden && currentUser) {
         try { sessionStorage.removeItem('chatpareja_refresh_pw'); } catch(e){}
         cleanupListeners();
-        auth.signOut().then(function() { showLoginScreen(); });
+        auth.signOut().then(function() {
+          currentUser = null;
+          currentUserRole = null;
+          showLoginScreen();
+          showPairingModal('enter');
+        });
       }
     });
 
