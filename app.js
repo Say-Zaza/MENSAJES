@@ -1320,8 +1320,8 @@ function buildBubbleContent(msg, bubble, isSelf) {
         iw.appendChild(badge);
       }
     }
-    if (msg.texto && !showPlaceholder) { var c = document.createElement('span'); c.className = 'msg-caption'; c.textContent = getPlainText(msg); iw.appendChild(c); }
     bubble.appendChild(iw);
+    if (msg.texto && !showPlaceholder) { var c = document.createElement('span'); c.className = 'msg-caption'; c.textContent = getPlainText(msg); bubble.appendChild(c); }
     bubble.classList.add('has-image');
   } else if (msg.imageGifUrl) {
     var gw = document.createElement('div');
@@ -1332,8 +1332,8 @@ function buildBubbleContent(msg, bubble, isSelf) {
     gi.loading = 'lazy';
     gi.addEventListener('click', function() { openLightbox(msg.imageGifUrl); });
     gw.appendChild(gi);
-    if (msg.texto) { var gc = document.createElement('span'); gc.className = 'msg-caption'; gc.textContent = getPlainText(msg); gw.appendChild(gc); }
     bubble.appendChild(gw);
+    if (msg.texto) { var gc = document.createElement('span'); gc.className = 'msg-caption'; gc.textContent = getPlainText(msg); bubble.appendChild(gc); }
     bubble.classList.add('has-image');
   } else if (msg.audioBase64 || msg.audioUrl) {
     var aw = document.createElement('div');
