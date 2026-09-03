@@ -116,7 +116,9 @@ function getIcon(name) {
 function renderIcon(container, name) {
   if (container) container.innerHTML = getIcon(name);
 }
+var splashVisible = true;
 function showError(msg) {
+  if (splashVisible) return;
   var old = document.querySelector('.error-toast');
   if (old) old.remove();
   var t = document.createElement('div');
@@ -127,6 +129,7 @@ function showError(msg) {
   setTimeout(function(){ t.remove(); }, 4000);
 }
 function showSuccess(msg) {
+  if (splashVisible) return;
   var old = document.querySelector('.success-toast');
   if (old) old.remove();
   var t = document.createElement('div');
@@ -137,6 +140,7 @@ function showSuccess(msg) {
   setTimeout(function(){ t.remove(); }, 3000);
 }
 function showInfo(msg) {
+  if (splashVisible) return;
   var old = document.querySelector('.info-toast');
   if (old) old.remove();
   var t = document.createElement('div');
@@ -338,6 +342,8 @@ function showLoginScreen() {
 function hideLoginScreen() {
   if (el.loginScreen) { el.loginScreen.style.display = 'none'; }
   if (el.chatContainer) { el.chatContainer.style.display = 'flex'; }
+  var ss = document.getElementById('splash-screen');
+  if (ss && !ss.classList.contains('hidden')) { ss.classList.add('hidden'); splashVisible = false; }
 }
 function softRefresh() {
   allMessages = [];
@@ -920,30 +926,70 @@ function cleanupListeners() {
    ============================================ */
 function compressImageToBase64(file) {
   return new Promise(function(resolve, reject) {
+    if (!file) { reject(new Error('No se proporcionó ningún archivo')); return; }
+    
+    var MAX_INPUT_BYTES = 25 * 1024 * 1024; // 25 MB
+    if (file.size > MAX_INPUT_BYTES) {
+      reject(new Error('La imagen pesa más de 25 MB. Elige una más liviana.'));
+      return;
+    }
+
     var reader = new FileReader();
     reader.onload = function(e) {
       var img = new Image();
       img.onload = function() {
-        var MAX = 4096, w = img.width, h = img.height;
-        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+        var origSizeMb = (file.size / (1024 * 1024)).toFixed(2);
+        var MAX = 1600;
+        var w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+          else { w = Math.round(w * MAX / h); h = MAX; }
+        }
+
         var c = document.createElement('canvas');
         c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        var quality = 1.0;
-        var base64 = c.toDataURL('image/jpeg', quality);
-        while (base64.length > 900000 && quality > 0.90) {
-          quality -= 0.02;
+        var ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+
+        var mime = (file.type === 'image/png') ? 'image/png' : 'image/jpeg';
+        var quality = 0.82;
+        var base64 = c.toDataURL(mime, quality);
+
+        var TARGET_LEN = 450000; // ~330 KB
+        while (base64.length > TARGET_LEN && quality > 0.30) {
+          quality -= 0.08;
           base64 = c.toDataURL('image/jpeg', quality);
         }
+
+        if (base64.length > 600000) {
+          var c2 = document.createElement('canvas');
+          c2.width = Math.round(w * 0.75);
+          c2.height = Math.round(h * 0.75);
+          c2.getContext('2d').drawImage(img, 0, 0, c2.width, c2.height);
+          base64 = c2.toDataURL('image/jpeg', 0.70);
+          w = c2.width; h = c2.height;
+        }
+
+        var compSizeKb = Math.round((base64.length * 0.75) / 1024);
+        console.log('📸 Compresión exitosa de imagen: Original (' + origSizeMb + ' MB) -> Comprimido (' + compSizeKb + ' KB) | Dim: ' + w + 'x' + h);
+
         var blur = document.createElement('canvas');
-        blur.width = 40; blur.height = Math.round(40 * h / w);
+        blur.width = 30; blur.height = Math.round(30 * h / w) || 30;
         blur.getContext('2d').drawImage(img, 0, 0, blur.width, blur.height);
-        resolve({ base64: base64, blurPlaceholder: blur.toDataURL('image/jpeg', 0.3), width: w, height: h, name: file.name });
+
+        resolve({
+          base64: base64,
+          blurPlaceholder: blur.toDataURL('image/jpeg', 0.25),
+          width: w,
+          height: h,
+          name: file.name,
+          originalFile: file
+        });
       };
-      img.onerror = function(){ reject(new Error('Error loading image')); };
+      img.onerror = function(){ reject(new Error('No se pudo procesar el formato de la imagen')); };
       img.src = e.target.result;
     };
-    reader.onerror = function(){ reject(new Error('Error reading file')); };
+    reader.onerror = function(){ reject(new Error('No se pudo leer el archivo de imagen')); };
     reader.readAsDataURL(file);
   });
 }
@@ -1468,6 +1514,11 @@ function buildBubbleContent(msg, bubble, isSelf) {
     else if (s === 'sent') se.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>';
     else if (s === 'delivered') se.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="18 6 9 17 4 12"/><polyline points="23 6 12 17"/></svg>';
     else if (s === 'read') se.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#53bdeb" stroke-width="2.5" width="14" height="14"><polyline points="18 6 9 17 4 12"/><polyline points="23 6 12 17"/></svg>';
+    else if (s === 'error') {
+      se.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" width="14" height="14" title="Error al enviar. Click para reintentar"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+      se.style.cursor = 'pointer';
+      se.onclick = function(evt) { evt.stopPropagation(); retrySendMessage(msg.id); };
+    }
     meta.appendChild(se);
   }
   bubble.appendChild(meta);
@@ -1527,12 +1578,57 @@ async function buildAndSend(msgId, plainText, currentReply, imageData, audioData
   sendToFirestoreOrQueue(data, msgId);
 }
 function sendToFirestoreOrQueue(data, msgId) {
-  if (isOnline) {
-    db.collection(MESSAGES_COLLECTION).doc(msgId).set(data).catch(function(e) {
-      console.error('Send error:', e);
-      addToOfflineQueue(data);
-    });
-  } else { addToOfflineQueue(data); }
+  var TIMEOUT_MS = 30000;
+  var timer = null;
+  var isDone = false;
+
+  function markError(errReason) {
+    if (isDone) return;
+    isDone = true;
+    if (timer) clearTimeout(timer);
+    console.error('Send error for message ' + msgId + ':', errReason);
+    var localMsg = allMessages.find(function(m){ return m.id === msgId; });
+    if (localMsg) {
+      localMsg.status = 'error';
+      updateRenderedMessage(localMsg);
+    }
+    showError(errReason || 'Error al enviar mensaje. Toca para reintentar.');
+    addToOfflineQueue(data);
+  }
+
+  if (!isOnline) {
+    markError('Sin conexión a internet. Guardado en cola offline.');
+    return;
+  }
+
+  timer = setTimeout(function() {
+    markError('El envío tardó demasiado tiempo (Timeout). Revisa tu conexión.');
+  }, TIMEOUT_MS);
+
+  db.collection(MESSAGES_COLLECTION).doc(msgId).set(data).then(function() {
+    if (isDone) return;
+    isDone = true;
+    if (timer) clearTimeout(timer);
+    var localMsg = allMessages.find(function(m){ return m.id === msgId; });
+    if (localMsg && localMsg.status === 'sending') {
+      localMsg.status = 'sent';
+      updateRenderedMessage(localMsg);
+    }
+  }).catch(function(e) {
+    var reason = (e && e.message && e.message.includes('maximum size'))
+      ? 'La imagen o mensaje excede el tamaño máximo permitido por Firestore'
+      : 'Error al guardar en la nube';
+    markError(reason);
+  });
+}
+
+function retrySendMessage(msgId) {
+  var msg = allMessages.find(function(m){ return m.id === msgId; });
+  if (!msg || !currentUser) return;
+  msg.status = 'sending';
+  updateRenderedMessage(msg);
+  showInfo('Reintentando envío...');
+  sendToFirestoreOrQueue(msg, msgId);
 }
 function sendImageMessage(base64, blur, w, h, caption, viewOnce) {
   sendMessage(caption || '', { base64: base64, blurPlaceholder: blur, width: w, height: h, viewOnce: !!viewOnce }, null);
@@ -2422,14 +2518,23 @@ function hideImageChip() {
 }
 function sendPendingImages() {
   if (pendingImageFiles.length === 0) return;
+  // Capturar los archivos ANTES de llamar a hideImagePreviewModal,
+  // porque esa función vacía pendingImageFiles inmediatamente.
+  var filesToSend = pendingImageFiles.slice();
   var caption = el.imageCaptionInput ? el.imageCaptionInput.value.trim() : '';
   var viewOnce = pendingViewOnce;
-  pendingImageFiles.forEach(function(file, i) {
+  hideImagePreviewModal();
+  var total = filesToSend.length;
+  filesToSend.forEach(function(file, i) {
+    var fileSizeMb = (file.size / (1024 * 1024)).toFixed(1);
+    if (total === 1) showInfo('Comprimiendo imagen (' + fileSizeMb + ' MB)...');
     compressImageToBase64(file).then(function(r) {
       sendImageMessage(r.base64, r.blurPlaceholder, r.width, r.height, i === 0 ? caption : '', viewOnce);
-    }).catch(function() { showError('Error al enviar imagen'); });
+    }).catch(function(err) {
+      var msg = (err && err.message) ? err.message : 'Error al procesar imagen';
+      showError(msg);
+    });
   });
-  hideImagePreviewModal();
 }
 
 /* EMOJI PICKER */
@@ -4301,7 +4406,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var splashScreen = document.getElementById('splash-screen');
   if (splashEnterBtn && splashScreen) {
     splashEnterBtn.addEventListener('click', function() {
-      setTimeout(function() { splashScreen.classList.add('hidden'); }, 7000);
+      setTimeout(function() { splashScreen.classList.add('hidden'); splashVisible = false; }, 7000);
     });
   }
 
