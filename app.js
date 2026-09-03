@@ -1829,6 +1829,11 @@ function clearReplyPreview() {
   if (el.replyPreview) el.replyPreview.style.display = 'none';
 }
 function openEditModal(msgId, text) {
+  var msg = allMessages.find(function(m){ return m.id === msgId; });
+  if (msg) {
+    var msgTime = msg.localTimestamp || (msg.timestamp && msg.timestamp.toMillis ? msg.timestamp.toMillis() : 0);
+    if (!msgTime || (Date.now() - msgTime) >= 15 * 60 * 1000) { showError('Tiempo de edición expirado (15 min)'); return; }
+  }
   editingMessageId = msgId;
   if (el.editModal) el.editModal.style.display = 'flex';
   if (el.editInput) { el.editInput.value = text; el.editInput.focus(); }
@@ -1867,7 +1872,11 @@ function showContextMenu(e, msg, isSelf) {
     { label: 'Responder', action: function(){ setReplyPreview(msg); } },
     { label: 'Reaccionar', action: function(){ openReactionPicker(msg); } }
   ];
-  if (isSelf && msg.texto && !msg.audioBase64) items.push({ label: 'Editar', action: function(){ openEditModal(msg.id, getPlainText(msg)); } });
+  if (isSelf && msg.texto && !msg.audioBase64) {
+    var msgTime = msg.localTimestamp || (msg.timestamp && msg.timestamp.toMillis ? msg.timestamp.toMillis() : 0);
+    var canEdit = msgTime && (Date.now() - msgTime) < 15 * 60 * 1000;
+    if (canEdit) items.push({ label: 'Editar', action: function(){ openEditModal(msg.id, getPlainText(msg)); } });
+  }
   if (isSelf) items.push({ label: 'Eliminar', action: function(){ deleteMessage(msg.id); }, danger: true });
   var isPinned = pinnedMessages.some(function(p){ return p.id === msg.id; });
   items.push({

@@ -2059,6 +2059,8 @@ body.dark-mode .chat-messages.chat-bg-active {
   transition: border var(--transition-fast);
 }
 .edit-textarea:focus { border-color: var(--primary-accent); box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+body.dark-mode .edit-textarea { background: #1f2c34; color: #fff; border-color: var(--border-color); }
+body.dark-mode .edit-textarea::placeholder { color: var(--color-text-muted); }
 
 .edit-modal-actions { display: flex; gap: 10px; margin-top: 14px; }
 .btn-edit-cancel, .btn-edit-save {
