@@ -216,10 +216,10 @@ async function runLoopingTest(iterations = 3) {
       if (!token) throw new Error("Fallo al obtener token de la cuenta de Firebase");
       console.log("  [1/5] ✅ Token de Firebase Auth obtenido correctamente.");
 
-      // Step 2: Crear mensaje simulación de >5 días en Firebase
-      const oldTimestamp = Date.now() - (6 * 24 * 60 * 60 * 1000); // 6 días en el pasado
+      // Step 2: Crear mensaje simulación de >3 días en Firebase
+      const oldTimestamp = Date.now() - (4 * 24 * 60 * 60 * 1000); // 4 días en el pasado
       const mockOldMessage = {
-        texto: `Mensaje de prueba antiguo #${i} (6 días atrás)`,
+        texto: `Mensaje de prueba antiguo #${i} (4 días atrás)`,
         autor: "TesterAuto",
         uid: "test_bot_loop",
         timestamp: oldTimestamp,
@@ -228,7 +228,7 @@ async function runLoopingTest(iterations = 3) {
 
       const createdMsgId = await syncService.createFirestoreMessage("general", mockOldMessage, token);
       if (!createdMsgId) throw new Error("Fallo creando mensaje de prueba en Firebase");
-      console.log(`  [2/5] ✅ Mensaje simulado >5 días creado en Firebase con ID: ${createdMsgId}`);
+      console.log(`  [2/5] ✅ Mensaje simulado >3 días creado en Firebase con ID: ${createdMsgId}`);
 
       // Step 3: Ejecutar Sincronización y Purga
       const syncRes = await syncService.runSyncAndPrune("general");
@@ -255,9 +255,9 @@ async function runLoopingTest(iterations = 3) {
       const isStillInFirebase = currentRemoteMsgs.some(m => m.id === createdMsgId);
 
       if (isStillInFirebase) {
-        throw new Error(`El mensaje ${createdMsgId} >5 días NO fue purgado de Firebase`);
+        throw new Error(`El mensaje ${createdMsgId} >3 días NO fue purgado de Firebase`);
       }
-      console.log(`  [5/5] ✅ Confirmado: El mensaje >5 días fue ELIMINADO de Firebase después de guardarse en esta computadora.`);
+      console.log(`  [5/5] ✅ Confirmado: El mensaje >3 días fue ELIMINADO de Firebase después de guardarse en esta computadora.`);
 
       passCount++;
       console.log(`✨ CICLO #${i} FINALIZADO CON ÉXITO.`);

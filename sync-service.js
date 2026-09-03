@@ -10,7 +10,7 @@ const FIREBASE_CONFIG = {
 const DB_FILE = path.join(__dirname, "database.json");
 const MEDIA_DIR = path.join(__dirname, "media");
 const CONFIG_FILE = path.join(__dirname, "sync-config.json");
-const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 // UIDs fijos de las 2 cuentas de la pareja (para respaldar perfiles/presencia)
 const FIXED_ACCOUNTS = [
@@ -686,7 +686,7 @@ async function runSyncAndPrune(roomId = "general") {
     const msgId = remoteMsg.id;
     if (pinnedIds.has(msgId)) { skippedPinnedCount++; continue; }
     const msgAgeMs = now - (remoteMsg.timestamp || now);
-    if (msgAgeMs > FIVE_DAYS_MS) {
+    if (msgAgeMs > THREE_DAYS_MS) {
       console.log(`🗑️ [SyncService] Mensaje ${msgId} (Antigüedad: ${(msgAgeMs / (1000 * 3600 * 24)).toFixed(1)} días) -> Eliminando de Firebase...`);
       const deleted = await deleteFirestoreMessage(roomId, msgId, token);
       if (deleted) {
@@ -698,7 +698,7 @@ async function runSyncAndPrune(roomId = "general") {
   console.log(`✅ [SyncService] Sincronización completada con éxito:
      - Mensajes nuevos guardados localmente: ${downloadedCount}
      - Imágenes/archivos guardados en disco (${MEDIA_DIR}): ${mediaSavedCount}
-     - Mensajes antiguos (>5 días) eliminados de Firebase: ${deletedFromFirebaseCount}
+     - Mensajes antiguos (>3 días) eliminados de Firebase: ${deletedFromFirebaseCount}
      - Mensajes fijados protegidos de la purga: ${skippedPinnedCount}`);
 
   return {
@@ -746,7 +746,7 @@ module.exports = {
   FIXED_ACCOUNTS,
   runSyncAndPrune,
   startSyncLoop,
-  FIVE_DAYS_MS,
+  THREE_DAYS_MS,
   MEDIA_DIR,
   DB_FILE
 };
