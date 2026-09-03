@@ -361,17 +361,8 @@ function softRefresh() {
   });
 }
 function tryAutoLogin() {
-  var pw = null;
-  try { pw = sessionStorage.getItem('chatpareja_refresh_pw'); } catch(e){}
-  if (!pw) return;
   try { sessionStorage.removeItem('chatpareja_refresh_pw'); } catch(e){}
-  if (el.loginPassword) el.loginPassword.value = pw;
-  if (el.loginError) el.loginError.style.display = 'none';
-  if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = true; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrando...'; }
-  tryLoginWithPassword(pw).catch(function(err) {
-    console.error('Auto-login error:', err);
-    if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
-  });
+  return;
 }
 function initTheme() {
   var saved = 'system';
@@ -4130,9 +4121,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!pw) { if (el.loginError) { el.loginError.textContent = 'Ingresa la clave'; el.loginError.style.display = 'block'; } return; }
       if (el.loginError) el.loginError.style.display = 'none';
       if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = true; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrando...'; }
-      tryLoginWithPassword(pw).then(function() {
-        try { sessionStorage.setItem('chatpareja_refresh_pw', pw); } catch(e){}
-      }).catch(function(err) {
+      tryLoginWithPassword(pw).catch(function(err) {
         console.error('Login error:', err);
         if (el.loginError) { el.loginError.textContent = 'Clave incorrecta'; el.loginError.style.display = 'block'; }
         if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
