@@ -165,6 +165,11 @@ app.get('/api/profile/:room', (req, res) => {
 });
 
 app.get('/api/cleanup-db', (req, res) => {
+  const uid = req.query.uid;
+  const ALLOWED_UIDS = ['Wo9mPGZOafccEETULDr2aFTzjV03', 'cGHUgMDtcnboB74AlaqgWMxs9w82'];
+  if (!uid || !ALLOWED_UIDS.includes(uid)) {
+    return res.status(403).json({ success: false, error: 'Unauthorized' });
+  }
   try {
     const db = syncService.readLocalDB();
     const roomId = req.query.room || 'general';
@@ -439,8 +444,11 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('presenceUpdate', buildPresencePayload(roomId));
   });
 
-  socket.on('cleanupRoom', ({ roomId }) => {
-    if (!roomId) return;
+  socket.on('cleanupRoom', ({ roomId, uid }) => {
+    if (!roomId || !uid) return;
+    const ALLOWED_UIDS = ['Wo9mPGZOafccEETULDr2aFTzjV03', 'cGHUgMDtcnboB74AlaqgWMxs9w82'];
+    if (!ALLOWED_UIDS.includes(uid)) return;
+    if (socketUid && socketUid !== uid) return;
     io.to(roomId).emit('roomCleared');
   });
 

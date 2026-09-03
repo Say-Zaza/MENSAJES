@@ -1,10 +1,10 @@
-﻿const fs = require("fs");
+const fs = require("fs");
 const fsp = fs.promises;
 const path = require("path");
 
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyALVjHZtbEJGAx2pswt4l4h654ieGJw_tk",
-  projectId: "mensajes-31f68"
+  apiKey: "AIzaSyDiawpwZcAucYTqWDbqm04ydGqOJOzdY9M",
+  projectId: "race-master-3d-ee76f"
 };
 
 const DB_FILE = path.join(__dirname, "database.json");
@@ -14,8 +14,8 @@ const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 
 // UIDs fijos de las 2 cuentas de la pareja (para respaldar perfiles/presencia)
 const FIXED_ACCOUNTS = [
-  { uid: "fNTZvGYfOHQ5ldkwqLLFee8RYJ73", assignedKey: "user1" },
-  { uid: "Jc0lOW6eSyeEHmXkr1ZRGQVhEGS2", assignedKey: "user2" }
+  { uid: "Wo9mPGZOafccEETULDr2aFTzjV03", assignedKey: "user1" },
+  { uid: "cGHUgMDtcnboB74AlaqgWMxs9w82", assignedKey: "user2" }
 ];
 
 if (!fs.existsSync(MEDIA_DIR)) {
@@ -148,24 +148,31 @@ function saveMediaFileLocally(messageId, base64Str, mimeType) {
   }
 }
 
-function saveAudioFileLocally(messageId, base64Str, mimeType) {
+async function saveAudioFileLocally(messageId, base64OrUrl, mimeType) {
   try {
-    if (!base64Str || typeof base64Str !== "string") return null;
-    
-    let ext = "wav";
+    if (!base64OrUrl || typeof base64OrUrl !== "string") return null;
+
+    let ext = "webm";
     if (mimeType && mimeType.includes("webm")) ext = "webm";
     else if (mimeType && mimeType.includes("mp4")) ext = "mp4";
     else if (mimeType && mimeType.includes("ogg")) ext = "ogg";
-    else if (base64Str.startsWith("data:audio/webm")) ext = "webm";
-    else if (base64Str.startsWith("data:audio/mp4")) ext = "mp4";
-    
-    const cleanBase64 = base64Str.replace(/^data:audio\/[\w+;]+base64,/, "");
-    const buffer = Buffer.from(cleanBase64, "base64");
-    
+    else if (base64OrUrl.startsWith("data:audio/webm")) ext = "webm";
+    else if (base64OrUrl.startsWith("data:audio/mp4")) ext = "mp4";
+    else if (base64OrUrl.startsWith("data:audio/ogg")) ext = "ogg";
+
     const fileName = `audio_${messageId}.${ext}`;
     const filePath = path.join(MEDIA_DIR, fileName);
-    
-    fs.writeFileSync(filePath, buffer);
+
+    if (base64OrUrl.startsWith("http://") || base64OrUrl.startsWith("https://")) {
+      const res = await fetch(base64OrUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const arrayBuffer = await res.arrayBuffer();
+      fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+    } else {
+      const cleanBase64 = base64OrUrl.replace(/^data:audio\/[\w+;]+base64,/, "");
+      const buffer = Buffer.from(cleanBase64, "base64");
+      fs.writeFileSync(filePath, buffer);
+    }
     return `/media/${fileName}`;
   } catch (err) {
     console.error(`❌ [SyncService] Error guardando audio local para ${messageId}:`, err.message);
@@ -221,7 +228,9 @@ async function fetchFirestoreMessages(roomId, token) {
       if (fields.imageHeight?.integerValue !== undefined) msg.imageHeight = parseInt(fields.imageHeight.integerValue, 10);
       if (fields.imageName?.stringValue !== undefined) msg.imageName = fields.imageName.stringValue;
       if (fields.audioBase64?.stringValue !== undefined) msg.audioBase64 = fields.audioBase64.stringValue;
+      if (fields.audioUrl?.stringValue !== undefined) msg.audioUrl = fields.audioUrl.stringValue;
       if (fields.audioMimeType?.stringValue !== undefined) msg.audioMimeType = fields.audioMimeType.stringValue;
+      if (fields.audioDuration?.integerValue !== undefined) msg.audioDuration = parseInt(fields.audioDuration.integerValue, 10);
       if (fields.viewOnce !== undefined) msg.viewOnce = !!fields.viewOnce.booleanValue;
       if (fields.viewOnceViewed !== undefined) msg.viewOnceViewed = !!fields.viewOnceViewed.booleanValue;
 
@@ -608,8 +617,9 @@ async function runSyncAndPrune(roomId = "general") {
       }
     }
 
-    if (remoteMsg.audioBase64 && !localMsg.localAudioPath) {
-      const audioPath = saveAudioFileLocally(msgId, remoteMsg.audioBase64, remoteMsg.audioMimeType);
+    if ((remoteMsg.audioBase64 || remoteMsg.audioUrl) && !localMsg.localAudioPath) {
+      const audioSource = remoteMsg.audioBase64 || remoteMsg.audioUrl;
+      const audioPath = await saveAudioFileLocally(msgId, audioSource, remoteMsg.audioMimeType);
       if (audioPath) {
         localMsg.localAudioPath = audioPath;
         mediaSavedCount++;

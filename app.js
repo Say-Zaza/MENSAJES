@@ -10,7 +10,9 @@ var firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 var db = firebase.firestore();
 var auth = firebase.auth();
-db.enablePersistence({ synchronizeTabs: true }).catch(function(){});
+db.enablePersistence({ synchronizeTabs: true }).catch(function(err) {
+  console.warn('Firestore persistence failed:', err.code);
+});
 
 var ROOM_ID = 'general';
 var MESSAGES_COLLECTION = 'rooms/' + ROOM_ID + '/messages';
@@ -18,6 +20,9 @@ var USERS_COLLECTION = 'rooms/' + ROOM_ID + '/users';
 var DESTACADOS_COLLECTION = 'rooms/' + ROOM_ID + '/destacados';
 var SETTINGS_COLLECTION = 'rooms/' + ROOM_ID + '/settings';
 var TYPING_COLLECTION = 'rooms/' + ROOM_ID + '/typing';
+var PAIRING_COLLECTION = 'rooms/' + ROOM_ID + '/pairing';
+var PAIRING_CODE_KEY = 'chatpareja_pairing_code_' + ROOM_ID;
+var PAIRING_CODE_TTL = 10 * 60 * 1000; // 10 min
 
 var ACCOUNTS = {
   user1: { key:'user1', email:'hombre@chatpareja.app', name:'Tu', color:'#2563eb' },
@@ -68,6 +73,14 @@ var calendarYear = new Date().getFullYear();
 var remindersItems = [];
 var remindersTab = 'active';
 var remindersUnsubscribe = null;
+var calendarUnsubscribe = null;
+var myDestacadosUnsubscribe = null;
+var partnerDestacadosUnsubscribe = null;
+var partnerShareSettingUnsubscribe = null;
+var pairingState = 'checking'; // 'checking' | 'generate' | 'show_code' | 'enter_code' | 'paired' | 'full'
+var pairingCode = null;
+var pairingCodeExpires = 0;
+var currentUserRole = null; // 'owner' | 'partner' | null
 var state = {
   mediaRecorder: null, audioChunks: [], recordingTimer: null,
   recordingSeconds: 0, voiceCancelled: false, isTyping: false, socket: null
@@ -80,10 +93,10 @@ var el = {};
 function generateClientId() {
   return 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
 }
+var _escapeDiv = document.createElement('div');
 function escapeHtml(text) {
-  var d = document.createElement('div');
-  d.appendChild(document.createTextNode(text || ''));
-  return d.innerHTML;
+  _escapeDiv.textContent = text || '';
+  return _escapeDiv.innerHTML;
 }
 function timeAgo(timestamp) {
   if (!timestamp) return '';
@@ -327,15 +340,19 @@ function hideLoginScreen() {
   if (el.chatContainer) { el.chatContainer.style.display = 'flex'; }
 }
 function softRefresh() {
-  startMessagesListener();
-  startPinnedListener();
-  startTypingListener();
-  startWishlistListener();
-  startCartasListener();
-  if (isOnline && currentUser) { flushOfflineQueue(); flushCartasOfflineQueue(); }
-  loadMyProfile();
-  loadPartnerProfile();
-  showSuccess('Chat sincronizado');
+  allMessages = [];
+  renderedMessageIds = new Set();
+  visibleCount = 40;
+  loadMyProfile().then(function() {
+    startMessagesListener();
+    startPinnedListener();
+    startTypingListener();
+    startWishlistListener();
+    startCartasListener();
+    if (isOnline && currentUser) { flushOfflineQueue(); flushCartasOfflineQueue(); }
+    loadPartnerProfile();
+    showSuccess('Chat sincronizado');
+  });
 }
 function tryAutoLogin() {
   var pw = null;
@@ -395,13 +412,22 @@ function flushOfflineQueue() {
   var q = getOfflineQueue();
   if (!q.length) return;
   var remaining = [];
+  var promises = [];
   q.forEach(function(item) {
     var msgId = item.id || generateClientId();
     item.id = msgId;
-    db.collection(MESSAGES_COLLECTION).doc(msgId).set(item).catch(function(){ remaining.push(item); });
+    var p = db.collection(MESSAGES_COLLECTION).doc(msgId).set(item).then(function() {
+      return true;
+    }).catch(function() {
+      remaining.push(item);
+      return false;
+    });
+    promises.push(p);
   });
-  saveOfflineQueue(remaining);
-  updatePendingIndicator();
+  Promise.allSettled(promises).then(function() {
+    saveOfflineQueue(remaining);
+    updatePendingIndicator();
+  });
 }
 
 /* ============================================
@@ -425,19 +451,6 @@ function startTypingListener() {
         ind.classList.add('hidden');
         ind.style.display = 'none';
         clearTimeout(partnerTypingTimeout);
-      }
-    });
-    snap.forEach(function(doc) {
-      var d = doc.data();
-      if (d.uid === (currentUser && currentUser.uid)) return;
-      var ind = document.getElementById('typing-indicator');
-      if (!ind) return;
-      if (d.isTyping) {
-        ind.innerHTML = '<span>' + escapeHtml(d.username || '') + ' escribiendo</span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
-        ind.classList.remove('hidden');
-        ind.style.display = 'flex';
-        clearTimeout(partnerTypingTimeout);
-        partnerTypingTimeout = setTimeout(function(){ ind.classList.add('hidden'); ind.style.display = 'none'; }, 4000);
       }
     });
   }, function(err){ console.error('Typing listener error:', err); });
@@ -478,7 +491,7 @@ function stopPresenceHeartbeat() {
 function startPartnerPresenceListener() {
   var partner = getPartnerConfig();
   if (!partner) return;
-  partnerPresenceUnsubscribe = db.collection(USERS_COLLECTION).where('uid', '!=', currentUser.uid).limit(1).onSnapshot(function(snap) {
+  partnerPresenceUnsubscribe = db.collection(USERS_COLLECTION).where('email', '==', partner.email).limit(1).onSnapshot(function(snap) {
     snap.forEach(function(doc) {
       var d = doc.data();
       partnerRealUid = doc.id;
@@ -490,7 +503,7 @@ function startPartnerPresenceListener() {
 function updateHeaderBadge(partnerOnline) {
   var partner = getPartnerConfig();
   if (!partner || !el.userBadge) return;
-  var status = partnerOnline === true ? ' - en linea' : partnerOnline === false ? ' - offline' : '';
+  var status = partnerOnline === true ? ' - en linea' : partnerOnline === false ? ' - sin conexion' : '';
   var pName = partnerProfile.username || partner.name;
   el.userBadge.textContent = pName + status;
   el.userBadge.style.color = partner.color;
@@ -638,40 +651,252 @@ async function fillPinnedPreview(pin, countAtCall, sigAtCall) {
 
 
 /* ============================================
+   PAIRING — Solo 2 usuarios permitidos
+   ============================================ */
+function generatePairingCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+function savePairingCodeLocal(code) {
+  var data = { code: code, expires: Date.now() + PAIRING_CODE_TTL };
+  try { localStorage.setItem(PAIRING_CODE_KEY, JSON.stringify(data)); } catch(e) {}
+  pairingCode = code;
+  pairingCodeExpires = data.expires;
+}
+function loadPairingCodeLocal() {
+  try {
+    var stored = localStorage.getItem(PAIRING_CODE_KEY);
+    if (stored) {
+      var data = JSON.parse(stored);
+      if (data.expires > Date.now()) {
+        pairingCode = data.code;
+        pairingCodeExpires = data.expires;
+        return data.code;
+      } else {
+        localStorage.removeItem(PAIRING_CODE_KEY);
+      }
+    }
+  } catch(e) {}
+  return null;
+}
+function clearPairingCodeLocal() {
+  try { localStorage.removeItem(PAIRING_CODE_KEY); } catch(e) {}
+  pairingCode = null;
+  pairingCodeExpires = 0;
+}
+async function checkPairingStatus(uid) {
+  try {
+    var doc = await db.collection(PAIRING_COLLECTION).doc(uid).get();
+    if (doc.exists) {
+      var data = doc.data();
+      currentUserRole = data.role || 'owner';
+      if (data.pairedAt) return true;
+      return false;
+    }
+    return false;
+  } catch (e) {
+    console.error('Error checking pairing status:', e);
+    return false;
+  }
+}
+async function getPairedUsersCount() {
+  try {
+    var snap = await db.collection(PAIRING_COLLECTION).get();
+    return snap.size;
+  } catch (e) {
+    console.error('Error getting paired count:', e);
+    return 2;
+  }
+}
+async function createPairingAsOwner(uid) {
+  var code = generatePairingCode();
+  var batch = db.batch();
+  var ownerRef = db.collection(PAIRING_COLLECTION).doc(uid);
+  batch.set(ownerRef, {
+    role: 'owner',
+    code: code,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    pairedAt: null
+  });
+  await batch.commit();
+  savePairingCodeLocal(code);
+  currentUserRole = 'owner';
+  return code;
+}
+async function joinPairingAsPartner(uid, code) {
+  var ownerQuery = await db.collection(PAIRING_COLLECTION).where('code', '==', code).where('role', '==', 'owner').limit(1).get();
+  if (ownerQuery.empty) {
+    throw new Error('Código inválido o expirado');
+  }
+  var ownerDoc = ownerQuery.docs[0];
+  var ownerUid = ownerDoc.id;
+  var partnerQuery = await db.collection(PAIRING_COLLECTION).where('role', '==', 'partner').limit(1).get();
+  if (!partnerQuery.empty) {
+    throw new Error('Este chat ya tiene pareja emparejada');
+  }
+  var batch = db.batch();
+  var partnerRef = db.collection(PAIRING_COLLECTION).doc(uid);
+  batch.set(partnerRef, {
+    role: 'partner',
+    ownerUid: ownerUid,
+    code: code,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    pairedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  batch.update(db.collection(PAIRING_COLLECTION).doc(ownerUid), {
+    pairedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  await batch.commit();
+  clearPairingCodeLocal();
+  currentUserRole = 'partner';
+  return true;
+}
+function showPairingModal(step) {
+  var modal = document.getElementById('pairing-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+  var steps = modal.querySelectorAll('.pairing-step');
+  for (var i = 0; i < steps.length; i++) steps[i].classList.add('hidden');
+  var stepEl = document.getElementById('pairing-step-' + step);
+  if (stepEl) stepEl.classList.remove('hidden');
+}
+function hidePairingModal() {
+  var modal = document.getElementById('pairing-modal');
+  if (modal) { modal.classList.add('hidden'); modal.style.display = 'none'; }
+}
+
+/* ============================================
    AUTH + LOGIN + INIT
    ============================================ */
 function checkUserAccess(user) {
   if (!user) { showLoginScreen(); return; }
   currentUser = user;
-  hideLoginScreen();
-  initializeUser();
+  var cfg = getUserConfig();
+  if (!cfg) { showLoginScreen(); return; }
+  db.collection(PAIRING_COLLECTION).doc(user.uid).get().then(function(doc) {
+    if (doc.exists && doc.data().pairedAt) {
+      currentUserRole = doc.data().role || 'owner';
+      hidePairingModal();
+      hideLoginScreen();
+      initializeUser();
+      return;
+    }
+    var isOwnerWaiting = doc.exists && doc.data().role === 'owner' && !doc.data().pairedAt;
+    getPairedUsersCount().then(function(count) {
+      if (count >= 2) {
+        pairingState = 'full';
+        showPairingModal('full');
+        hideLoginScreen();
+        if (el.messageInput) el.messageInput.disabled = true;
+        if (el.sendBtn) el.sendBtn.disabled = true;
+        return;
+      }
+      var savedCode = loadPairingCodeLocal();
+      if (savedCode && isOwnerWaiting) {
+        pairingState = 'show_code';
+        showPairingModal('show_code');
+        var codeDisplay = document.getElementById('pairing-code-display');
+        if (codeDisplay) codeDisplay.textContent = savedCode;
+        hideLoginScreen();
+        if (el.messageInput) el.messageInput.disabled = true;
+        if (el.sendBtn) el.sendBtn.disabled = true;
+        return;
+      }
+      if (isOwnerWaiting) {
+        pairingState = 'generate';
+        showPairingModal('generate');
+        hideLoginScreen();
+        if (el.messageInput) el.messageInput.disabled = true;
+        if (el.sendBtn) el.sendBtn.disabled = true;
+        return;
+      }
+      if (count >= 1) {
+        pairingState = 'enter_code';
+        showPairingModal('enter');
+        hideLoginScreen();
+        if (el.messageInput) el.messageInput.disabled = true;
+        if (el.sendBtn) el.sendBtn.disabled = true;
+        return;
+      }
+      pairingState = 'generate';
+      showPairingModal('generate');
+      hideLoginScreen();
+      if (el.messageInput) el.messageInput.disabled = true;
+      if (el.sendBtn) el.sendBtn.disabled = true;
+    });
+  }).catch(function() {
+    getPairedUsersCount().then(function(count) {
+      if (count >= 2) {
+        pairingState = 'full';
+        showPairingModal('full');
+        hideLoginScreen();
+        if (el.messageInput) el.messageInput.disabled = true;
+        if (el.sendBtn) el.sendBtn.disabled = true;
+        return;
+      }
+      var savedCode = loadPairingCodeLocal();
+      if (savedCode) {
+        pairingState = 'show_code';
+        showPairingModal('show_code');
+        var codeDisplay = document.getElementById('pairing-code-display');
+        if (codeDisplay) codeDisplay.textContent = savedCode;
+        hideLoginScreen();
+        if (el.messageInput) el.messageInput.disabled = true;
+        if (el.sendBtn) el.sendBtn.disabled = true;
+        return;
+      }
+      if (count >= 1) {
+        pairingState = 'enter_code';
+        showPairingModal('enter');
+        hideLoginScreen();
+        if (el.messageInput) el.messageInput.disabled = true;
+        if (el.sendBtn) el.sendBtn.disabled = true;
+        return;
+      }
+      pairingState = 'generate';
+      showPairingModal('generate');
+      hideLoginScreen();
+      if (el.messageInput) el.messageInput.disabled = true;
+      if (el.sendBtn) el.sendBtn.disabled = true;
+    });
+  });
 }
 function initializeUser() {
   var cfg = getUserConfig();
   if (!cfg) return;
   username = cfg.name;
   assignedKey = cfg.key;
+  allMessages = [];
+  renderedMessageIds = new Set();
+  visibleCount = 40;
   updateHeaderBadge(null);
   if (el.messageInput) el.messageInput.disabled = false;
   if (el.cartaInput) el.cartaInput.disabled = false;
   if (el.cartaBody) el.cartaBody.disabled = false;
   if (el.sendBtn) el.sendBtn.disabled = false;
-  startMessagesListener();
-  startTypingListener();
-  startPinnedListener();
-  startPresenceHeartbeat();
-  startPartnerPresenceListener();
-  loadMyProfile();
-  loadPartnerProfile();
-  updateHeaderPartnerAvatar();
-  startDestacadosListeners();
-  startPartnerShareSettingListener();
-  startWishlistListener();
-  startCartasListener();
-  startCalendarListener();
-  startRemindersListener();
-  initE2ee();
-  if (isOnline) { flushOfflineQueue(); flushCartasOfflineQueue(); }
+  loadMyProfile().then(function() {
+    startMessagesListener();
+    startTypingListener();
+    startPinnedListener();
+    startPresenceHeartbeat();
+    startPartnerPresenceListener();
+    loadPartnerProfile();
+    updateHeaderPartnerAvatar();
+    startDestacadosListeners();
+    startPartnerShareSettingListener();
+    startWishlistListener();
+    startCartasListener();
+    initChatBackground();
+    startCalendarListener();
+    startRemindersListener();
+    initE2ee();
+    loadChatBackground();
+    if (scheduledCartasInterval) clearInterval(scheduledCartasInterval);
+    scheduledCartasInterval = setInterval(checkScheduledCartas, 60000);
+    if (remindersCheckInterval) clearInterval(remindersCheckInterval);
+    remindersCheckInterval = setInterval(checkRemindersDue, 30000);
+    if (isOnline) { flushOfflineQueue(); flushCartasOfflineQueue(); }
+  });
 }
 function cleanupListeners() {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
@@ -680,7 +905,14 @@ function cleanupListeners() {
   if (partnerPresenceUnsubscribe) { partnerPresenceUnsubscribe(); partnerPresenceUnsubscribe = null; }
   if (wishlistUnsubscribe) { wishlistUnsubscribe(); wishlistUnsubscribe = null; }
   if (cartasUnsubscribe) { cartasUnsubscribe(); cartasUnsubscribe = null; }
+  if (calendarUnsubscribe) { calendarUnsubscribe(); calendarUnsubscribe = null; }
+  if (remindersUnsubscribe) { remindersUnsubscribe(); remindersUnsubscribe = null; }
+  if (myDestacadosUnsubscribe) { myDestacadosUnsubscribe(); myDestacadosUnsubscribe = null; }
+  if (partnerDestacadosUnsubscribe) { partnerDestacadosUnsubscribe(); partnerDestacadosUnsubscribe = null; }
+  if (partnerShareSettingUnsubscribe) { partnerShareSettingUnsubscribe(); partnerShareSettingUnsubscribe = null; }
   stopPresenceHeartbeat();
+  if (scheduledCartasInterval) { clearInterval(scheduledCartasInterval); scheduledCartasInterval = null; }
+  if (remindersCheckInterval) { clearInterval(remindersCheckInterval); remindersCheckInterval = null; }
 }
 
 /* ============================================
@@ -692,12 +924,17 @@ function compressImageToBase64(file) {
     reader.onload = function(e) {
       var img = new Image();
       img.onload = function() {
-        var MAX = 2560, w = img.width, h = img.height;
+        var MAX = 4096, w = img.width, h = img.height;
         if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
         var c = document.createElement('canvas');
         c.width = w; c.height = h;
         c.getContext('2d').drawImage(img, 0, 0, w, h);
-        var base64 = c.toDataURL('image/jpeg', 1.0);
+        var quality = 1.0;
+        var base64 = c.toDataURL('image/jpeg', quality);
+        while (base64.length > 900000 && quality > 0.90) {
+          quality -= 0.02;
+          base64 = c.toDataURL('image/jpeg', quality);
+        }
         var blur = document.createElement('canvas');
         blur.width = 40; blur.height = Math.round(40 * h / w);
         blur.getContext('2d').drawImage(img, 0, 0, blur.width, blur.height);
@@ -716,15 +953,15 @@ function resizeAvatarForProfile(file) {
     reader.onload = function(ev) {
       var img = new Image();
       img.onload = function() {
-        var MAX = 1200, w = img.width, h = img.height;
+        var MAX = 2048, w = img.width, h = img.height;
         if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
         var c = document.createElement('canvas');
         c.width = w; c.height = h;
         c.getContext('2d').drawImage(img, 0, 0, w, h);
-        var quality = 0.92;
+        var quality = 1.0;
         var dataUrl = c.toDataURL('image/jpeg', quality);
-        while (dataUrl.length > 900000 && quality > 0.5) {
-          quality -= 0.05;
+        while (dataUrl.length > 900000 && quality > 0.90) {
+          quality -= 0.02;
           dataUrl = c.toDataURL('image/jpeg', quality);
         }
         resolve(dataUrl);
@@ -864,7 +1101,10 @@ function handleIncomingMessageStatuses(msgs) {
 function renderMessagesList() {
   if (!el.messagesContainer) return;
   var wasAtBottom = isUserAtBottom();
-  el.messagesContainer.querySelectorAll('.message-wrapper, .date-separator, .skeleton-msg').forEach(function(e){ e.remove(); });
+  el.messagesContainer.querySelectorAll('.message-wrapper, .date-separator, .skeleton-msg').forEach(function(e){
+    if (e._cleanupAudioScrub) e._cleanupAudioScrub();
+    e.remove();
+  });
   renderedMessageIds = new Set();
   if (el.welcomeMessage && allMessages.length > 0) el.welcomeMessage.remove();
   var msgs = allMessages.slice(-visibleCount);
@@ -923,6 +1163,10 @@ function createMessageElement(msg, isSelf, isGrouped) {
   var bubble = document.createElement('div');
   bubble.className = 'message-bubble';
   buildBubbleContent(msg, bubble, isSelf);
+  var audioPlayerEl = bubble.querySelector('.msg-audio-player');
+  if (audioPlayerEl && audioPlayerEl._cleanupAudioScrub) {
+    wrapper._cleanupAudioScrub = audioPlayerEl._cleanupAudioScrub;
+  }
   var replyBtn = document.createElement('button');
   replyBtn.className = 'swipe-reply-btn';
   replyBtn.innerHTML = getIcon('reply');
@@ -1004,11 +1248,12 @@ function buildBubbleContent(msg, bubble, isSelf) {
       ph.className = 'viewonce-placeholder';
       ph.innerHTML = '<span class="material-symbols-outlined viewonce-icon">visibility</span><span class="viewonce-label">Toca para ver una vez</span>';
       ph.addEventListener('click', function() {
+        var imgs = allMessages.filter(function(m) { return m.imageBase64 && !(m.viewOnce && m.uid !== currentUser.uid && m.viewOnceViewed); }).map(function(m) { return m.imageBase64; });
+        var idx = imgs.indexOf(msg.imageBase64);
+        if (idx < 0) { imgs.unshift(msg.imageBase64); idx = 0; }
         db.collection('rooms/' + ROOM_ID + '/messages').doc(msg.id).update({ viewOnceViewed: true }).catch(function(){});
         msg.viewOnceViewed = true;
-        var imgs = allMessages.filter(function(m) { return m.imageBase64 && !(m.viewOnce && !m.uid_ && m.viewOnceViewed); }).map(function(m) { return m.imageBase64; });
-        var idx = imgs.indexOf(msg.imageBase64);
-        openLightbox(msg.imageBase64, imgs, idx >= 0 ? idx : 0);
+        openLightbox(msg.imageBase64, imgs, idx, true);
       });
       iw.appendChild(ph);
       iw.style.aspectRatio = 'auto';
@@ -1023,6 +1268,12 @@ function buildBubbleContent(msg, bubble, isSelf) {
         openLightbox(msg.imageBase64, imgs, idx >= 0 ? idx : 0);
       });
       iw.appendChild(im);
+      if (msg.viewOnce && isMine) {
+        var badge = document.createElement('div');
+        badge.className = 'viewonce-sent-badge';
+        badge.innerHTML = '<span class="material-symbols-outlined">visibility</span> Ver una vez';
+        iw.appendChild(badge);
+      }
     }
     if (msg.texto && !showPlaceholder) { var c = document.createElement('span'); c.className = 'msg-caption'; c.textContent = getPlainText(msg); iw.appendChild(c); }
     bubble.appendChild(iw);
@@ -1040,12 +1291,13 @@ function buildBubbleContent(msg, bubble, isSelf) {
     if (msg.texto) { var gc = document.createElement('span'); gc.className = 'msg-caption'; gc.textContent = getPlainText(msg); gw.appendChild(gc); }
     bubble.appendChild(gw);
     bubble.classList.add('has-image');
-  } else if (msg.audioBase64) {
+  } else if (msg.audioBase64 || msg.audioUrl) {
     var aw = document.createElement('div');
     aw.className = 'msg-audio-player';
     var playBtn = document.createElement('button');
     playBtn.type = 'button';
     playBtn.className = 'audio-play-btn';
+    playBtn.setAttribute('aria-label', 'Reproducir audio');
     playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
     var trackWrap = document.createElement('div');
     trackWrap.className = 'audio-track-wrap';
@@ -1056,7 +1308,7 @@ function buildBubbleContent(msg, bubble, isSelf) {
     progress.appendChild(progressFill);
     var waveform = document.createElement('div');
     waveform.className = 'audio-waveform-v2';
-    var barCount = 35;
+    var barCount = 32;
     for (var wi = 0; wi < barCount; wi++) {
       var bar = document.createElement('span');
       bar.className = 'wave-bar';
@@ -1065,62 +1317,100 @@ function buildBubbleContent(msg, bubble, isSelf) {
     }
     trackWrap.appendChild(progress);
     trackWrap.appendChild(waveform);
+    var durationVal = msg.audioDuration || 0;
     var timeLabel = document.createElement('span');
     timeLabel.className = 'audio-time-label';
-    timeLabel.textContent = '0:00';
+    timeLabel.textContent = durationVal ? fmtTime(durationVal) : '0:00';
     aw.appendChild(playBtn);
     aw.appendChild(trackWrap);
     aw.appendChild(timeLabel);
     var au = document.createElement('audio');
-    au.src = msg.audioBase64;
+    au.src = msg.localAudioPath || msg.audioUrl || msg.audioBase64;
     au.preload = 'metadata';
     au.style.display = 'none';
     aw.appendChild(au);
     var playing = false;
-    function fmtTime(s) {
-      if (!isFinite(s)) return '0:00';
-      var t = Math.round(s);
-      return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
-    }
+
     au.addEventListener('loadedmetadata', function() {
-      timeLabel.textContent = '0:00 / ' + fmtTime(au.duration);
+      if (au.duration && isFinite(au.duration)) {
+        timeLabel.textContent = fmtTime(au.currentTime) + ' / ' + fmtTime(au.duration);
+      }
     });
+
     au.addEventListener('timeupdate', function() {
       if (!au.duration) return;
       var pct = (au.currentTime / au.duration) * 100;
       progressFill.style.width = pct + '%';
       timeLabel.textContent = fmtTime(au.currentTime) + ' / ' + fmtTime(au.duration);
     });
+
     au.addEventListener('ended', function() {
       playing = false;
+      if (currentlyPlayingAudio === au) currentlyPlayingAudio = null;
       playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
       playBtn.classList.remove('playing');
       progressFill.style.width = '0%';
+      if (durationVal || au.duration) {
+        timeLabel.textContent = fmtTime(durationVal || au.duration);
+      }
     });
+
+    au.addEventListener('pause', function() {
+      if (playing) {
+        playing = false;
+        if (currentlyPlayingAudio === au) currentlyPlayingAudio = null;
+        playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+        playBtn.classList.remove('playing');
+      }
+    });
+
     playBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      if (playing) { au.pause(); }
-      else { au.play().catch(function(){}); }
-      playing = !playing;
-      playBtn.innerHTML = playing
-        ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>'
-        : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
-      playBtn.classList.toggle('playing', playing);
+      if (playing) {
+        au.pause();
+        playing = false;
+        if (currentlyPlayingAudio === au) currentlyPlayingAudio = null;
+        playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+        playBtn.classList.remove('playing');
+      } else {
+        if (currentlyPlayingAudio && currentlyPlayingAudio !== au) {
+          try { currentlyPlayingAudio.pause(); } catch(err){}
+        }
+        currentlyPlayingAudio = au;
+        au.play().then(function() {
+          playing = true;
+          playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>';
+          playBtn.classList.add('playing');
+        }).catch(function(err) {
+          console.error('Play error:', err);
+          showError('No se pudo reproducir el audio');
+        });
+      }
     });
+
     var dragging = false;
+    function onDocMove(e) { if (dragging) { var touch = e.touches ? e.touches[0] : e; scrub(touch); } }
+    function onDocEnd() { dragging = false; }
     function scrub(e) {
       var rect = progress.getBoundingClientRect();
       var x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      if (au.duration) { au.currentTime = x * au.duration; }
+      if (au.duration && isFinite(au.duration)) { au.currentTime = x * au.duration; }
       progressFill.style.width = (x * 100) + '%';
     }
     progress.addEventListener('mousedown', function(e) { dragging = true; scrub(e); });
     progress.addEventListener('touchstart', function(e) { dragging = true; scrub(e.touches[0]); }, { passive: true });
-    document.addEventListener('mousemove', function(e) { if (dragging) scrub(e); });
-    document.addEventListener('touchmove', function(e) { if (dragging) scrub(e.touches[0]); }, { passive: true });
-    document.addEventListener('mouseup', function() { dragging = false; });
-    document.addEventListener('touchend', function() { dragging = false; });
-    if (msg.audioBase64.indexOf('data:audio') === 0) {
+    document.addEventListener('mousemove', onDocMove);
+    document.addEventListener('touchmove', onDocMove, { passive: true });
+    document.addEventListener('mouseup', onDocEnd);
+    document.addEventListener('touchend', onDocEnd);
+    aw._cleanupAudioScrub = function() {
+      document.removeEventListener('mousemove', onDocMove);
+      document.removeEventListener('touchmove', onDocMove);
+      document.removeEventListener('mouseup', onDocEnd);
+      document.removeEventListener('touchend', onDocEnd);
+    };
+
+    if (msg.audioBase64 && msg.audioBase64.indexOf('data:audio') === 0) {
       try {
         var raw = msg.audioBase64.split(',')[1];
         var bytes = atob(raw);
@@ -1222,7 +1512,12 @@ async function buildAndSend(msgId, plainText, currentReply, imageData, audioData
     if (imageData.gifUrl) { data.imageGifUrl = imageData.url; data.imageWidth = imageData.w || 0; data.imageHeight = imageData.h || 0; }
     else { data.imageBase64 = imageData.base64; data.imageBlur = imageData.blurPlaceholder; data.imageWidth = imageData.width; data.imageHeight = imageData.height; if (imageData.viewOnce) data.viewOnce = true; }
   }
-  if (audioData) { data.audioBase64 = audioData.base64; data.audioMimeType = audioData.mimeType || 'audio/webm'; }
+  if (audioData) {
+    if (audioData.url) data.audioUrl = audioData.url;
+    if (audioData.base64) data.audioBase64 = audioData.base64;
+    data.audioMimeType = audioData.mimeType || 'audio/webm';
+    data.audioDuration = audioData.duration || 0;
+  }
   decryptedMap[msgId] = { texto: plainText };
   if (currentReply) {
     decryptedMap[msgId].replyTexto = replyPlain;
@@ -1233,7 +1528,10 @@ async function buildAndSend(msgId, plainText, currentReply, imageData, audioData
 }
 function sendToFirestoreOrQueue(data, msgId) {
   if (isOnline) {
-    db.collection(MESSAGES_COLLECTION).doc(msgId).set(data).catch(function(e) { console.error('Send error:', e); addToOfflineQueue(data); });
+    db.collection(MESSAGES_COLLECTION).doc(msgId).set(data).catch(function(e) {
+      console.error('Send error:', e);
+      addToOfflineQueue(data);
+    });
   } else { addToOfflineQueue(data); }
 }
 function sendImageMessage(base64, blur, w, h, caption, viewOnce) {
@@ -1494,9 +1792,11 @@ function showContextMenu(e, msg, isSelf) {
     menu.appendChild(btn);
   });
   document.body.appendChild(menu);
-  var rect = (e.target.closest('.message-wrapper') || e.target).getBoundingClientRect();
-  menu.style.top = Math.min(rect.top, window.innerHeight - 200) + 'px';
-  menu.style.left = Math.min(e.clientX || rect.left, window.innerWidth - 180) + 'px';
+  if (window.innerWidth >= 768) {
+    var rect = (e.target.closest('.message-wrapper') || e.target).getBoundingClientRect();
+    menu.style.top = Math.min(rect.top, window.innerHeight - 200) + 'px';
+    menu.style.left = Math.min(e.clientX || rect.left, window.innerWidth - 180) + 'px';
+  }
 }
 function closeAllMenus() {
   document.querySelectorAll('.custom-context-menu').forEach(function(m){ m.remove(); });
@@ -1591,7 +1891,7 @@ function searchPrev() {
   cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
   updateSearchCount(el._searchIndex + 1, el._searchMatches.length);
 }
-function openLightbox(src, allImages, curIdx) {
+function openLightbox(src, allImages, curIdx, viewOnce) {
   if (!allImages) allImages = [src];
   if (curIdx == null) curIdx = 0;
   var ov = document.createElement('div');
@@ -1604,7 +1904,8 @@ function openLightbox(src, allImages, curIdx) {
   var counter = document.createElement('div');
   counter.style.cssText = 'position:absolute;top:16px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.7);font-size:13px;z-index:10;font-variant-numeric:tabular-nums';
   counter.textContent = (curIdx + 1) + ' / ' + allImages.length;
-  if (allImages.length <= 1) counter.style.display = 'none';
+  if (viewOnce) counter.textContent = '\uD83D\uDC41 Ver una vez \u2022 ' + counter.textContent;
+  if (allImages.length <= 1 && !viewOnce) counter.style.display = 'none';
   ov.appendChild(counter);
 
   var prevBtn = document.createElement('button');
@@ -1620,15 +1921,17 @@ function openLightbox(src, allImages, curIdx) {
 
   var actions = document.createElement('div');
   actions.style.cssText = 'position:absolute;bottom:24px;left:50%;transform:translateX(-50%);display:flex;gap:16px;z-index:10';
-  var dl = document.createElement('button');
-  dl.textContent = '\u2B07 Descargar';
-  dl.style.cssText = 'background:rgba(255,255,255,.15);color:#fff;border:none;padding:10px 20px;border-radius:20px;font-size:14px;cursor:pointer;backdrop-filter:blur(4px)';
-  dl.addEventListener('click', function(e) {
-    e.stopPropagation();
-    var a = document.createElement('a'); a.href = img.src; a.download = 'imagen-' + Date.now() + '.jpg';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  });
-  actions.appendChild(dl);
+  if (!viewOnce) {
+    var dl = document.createElement('button');
+    dl.textContent = '\u2B07 Descargar';
+    dl.style.cssText = 'background:rgba(255,255,255,.15);color:#fff;border:none;padding:10px 20px;border-radius:20px;font-size:14px;cursor:pointer;backdrop-filter:blur(4px)';
+    dl.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var a = document.createElement('a'); a.href = img.src; a.download = 'imagen-' + Date.now() + '.jpg';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    });
+    actions.appendChild(dl);
+  }
   var cb = document.createElement('button');
   cb.textContent = '\u2715 Cerrar';
   cb.style.cssText = 'background:rgba(255,255,255,.15);color:#fff;border:none;padding:10px 20px;border-radius:20px;font-size:14px;cursor:pointer;backdrop-filter:blur(4px)';
@@ -1759,43 +2062,314 @@ function openLightbox(src, allImages, curIdx) {
   });
   document.body.appendChild(ov);
 }
+function fmtTime(s) {
+  if (!s || !isFinite(s) || isNaN(s)) return '0:00';
+  var t = Math.round(s);
+  var m = Math.floor(t / 60);
+  var sec = Math.floor(t % 60);
+  return m + ':' + String(sec).padStart(2, '0');
+}
+
+/* ============================================
+   VOICE MESSAGES SYSTEM (RECONSTRUCTED & ROBUST)
+   ============================================ */
 var mediaStream = null;
+var currentlyPlayingAudio = null;
+var pendingAudioBlob = null;
+var pendingAudioDuration = 0;
+var pendingAudioMimeType = '';
+var audioPreviewAudio = null;
+var isStartingRecording = false;
+var isPendingStopRecording = false;
+
+function getSupportedAudioMimeType() {
+  if (typeof MediaRecorder === 'undefined') return '';
+  var types = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/aac',
+    'audio/ogg;codecs=opus',
+    'audio/ogg'
+  ];
+  for (var i = 0; i < types.length; i++) {
+    if (MediaRecorder.isTypeSupported(types[i])) return types[i];
+  }
+  return '';
+}
+
 function startVoiceRecording() {
+  if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError('Tu navegador no soporta grabación de voz o requiere un entorno seguro (HTTPS)');
+    return;
+  }
+  if (isStartingRecording) return;
+  isStartingRecording = true;
+  isPendingStopRecording = false;
+
   navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+    isStartingRecording = false;
     mediaStream = stream;
-    var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-    state.mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
+    var mime = getSupportedAudioMimeType();
+    var options = mime ? { mimeType: mime } : {};
+
+    try {
+      state.mediaRecorder = new MediaRecorder(stream, options);
+    } catch(err) {
+      console.warn('Fallback MediaRecorder sin options:', err);
+      try {
+        state.mediaRecorder = new MediaRecorder(stream);
+      } catch(e) {
+        showError('No se pudo inicializar la grabación de audio');
+        cleanupVoiceRecording();
+        return;
+      }
+    }
+
     state.audioChunks = [];
     state.recordingSeconds = 0;
     state.voiceCancelled = false;
-    state.mediaRecorder.ondataavailable = function(e) { if (e.data.size > 0) state.audioChunks.push(e.data); };
-    state.mediaRecorder.onstop = function() {
-      if (!state.voiceCancelled && state.audioChunks.length > 0) sendAudioMessage(state.audioChunks, mime);
-      cleanupVoiceRecording();
+
+    state.mediaRecorder.ondataavailable = function(e) {
+      if (e.data && e.data.size > 0) state.audioChunks.push(e.data);
     };
-    state.mediaRecorder.start();
-    if (el.voiceIndicator) el.voiceIndicator.style.display = 'flex';
-    if (el.voiceBtn) el.voiceBtn.setAttribute('aria-pressed', 'true');
+
+    state.mediaRecorder.onstop = function() {
+      var finalDuration = state.recordingSeconds;
+      var wasCancelled = state.voiceCancelled;
+      var chunks = state.audioChunks;
+      var usedMime = (state.mediaRecorder && state.mediaRecorder.mimeType) || mime || 'audio/webm';
+
+      cleanupVoiceRecording();
+
+      if (!wasCancelled && chunks && chunks.length > 0) {
+        if (finalDuration < 1) {
+          showError('Nota de voz muy corta. Toca para grabar o mantén presionado');
+          return;
+        }
+        var blob = new Blob(chunks, { type: usedMime });
+        showAudioPreviewModal(blob, finalDuration, usedMime);
+      }
+    };
+
+    state.mediaRecorder.start(100);
+    if (el.voiceIndicator) {
+      el.voiceIndicator.style.display = 'flex';
+      el.voiceIndicator.classList.remove('hidden');
+    }
+    if (el.voiceBtn) {
+      el.voiceBtn.setAttribute('aria-pressed', 'true');
+      el.voiceBtn.classList.add('recording');
+    }
+
     state.recordingTimer = setInterval(function() {
       state.recordingSeconds++;
-      if (el.voiceRecTime) el.voiceRecTime.textContent = Math.floor(state.recordingSeconds / 60) + ':' + String(state.recordingSeconds % 60).padStart(2, '0');
-      var pct = Math.min(100, (state.recordingSeconds / 60) * 100);
+      if (el.voiceRecTime) {
+        el.voiceRecTime.textContent = Math.floor(state.recordingSeconds / 60) + ':' + String(state.recordingSeconds % 60).padStart(2, '0');
+      }
+      var pct = Math.min(100, (state.recordingSeconds / 180) * 100);
       var fill = document.getElementById('voice-rec-progress-fill');
       if (fill) fill.style.width = pct + '%';
-      if (state.recordingSeconds >= 60) stopVoiceRecording();
+      if (state.recordingSeconds >= 180) {
+        stopVoiceRecording();
+      }
     }, 1000);
-  }).catch(function(err) { console.error('Mic error:', err); showError('No se pudo acceder al microfono'); });
+
+    if (isPendingStopRecording) {
+      isPendingStopRecording = false;
+      setTimeout(stopVoiceRecording, 200);
+    }
+  }).catch(function(err) {
+    isStartingRecording = false;
+    isPendingStopRecording = false;
+    console.error('Mic error:', err);
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      showError('Permiso de micrófono denegado en tu navegador');
+    } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      showError('No se encontró ningún micrófono en este dispositivo');
+    } else {
+      showError('No se pudo acceder al micrófono');
+    }
+    cleanupVoiceRecording();
+  });
 }
+
 function stopVoiceRecording() {
-  if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') state.mediaRecorder.stop();
+  if (isStartingRecording) {
+    isPendingStopRecording = true;
+    return;
+  }
+  if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+    state.mediaRecorder.stop();
+  } else {
+    cleanupVoiceRecording();
+  }
 }
-function cancelVoiceRecording() { state.voiceCancelled = true; stopVoiceRecording(); }
+
+function cancelVoiceRecording() {
+  state.voiceCancelled = true;
+  stopVoiceRecording();
+}
+
 function cleanupVoiceRecording() {
-  if (state.recordingTimer) { clearInterval(state.recordingTimer); state.recordingTimer = null; }
-  if (mediaStream) { mediaStream.getTracks().forEach(function(t){ t.stop(); }); mediaStream = null; }
-  state.mediaRecorder = null; state.audioChunks = []; state.recordingSeconds = 0;
-  if (el.voiceIndicator) el.voiceIndicator.style.display = 'none';
-  if (el.voiceBtn) el.voiceBtn.setAttribute('aria-pressed', 'false');
+  isStartingRecording = false;
+  isPendingStopRecording = false;
+  if (state.recordingTimer) {
+    clearInterval(state.recordingTimer);
+    state.recordingTimer = null;
+  }
+  if (mediaStream) {
+    try {
+      mediaStream.getTracks().forEach(function(t){ t.stop(); });
+    } catch(e){}
+    mediaStream = null;
+  }
+  state.mediaRecorder = null;
+  state.audioChunks = [];
+  state.recordingSeconds = 0;
+  if (el.voiceIndicator) {
+    el.voiceIndicator.style.display = 'none';
+    el.voiceIndicator.classList.add('hidden');
+  }
+  if (el.voiceBtn) {
+    el.voiceBtn.setAttribute('aria-pressed', 'false');
+    el.voiceBtn.classList.remove('recording');
+  }
+  var fill = document.getElementById('voice-rec-progress-fill');
+  if (fill) fill.style.width = '0%';
+}
+
+/* AUDIO PREVIEW MODAL */
+function showAudioPreviewModal(blob, duration, mimeType) {
+  pendingAudioBlob = blob;
+  pendingAudioDuration = duration || 1;
+  pendingAudioMimeType = mimeType || 'audio/webm';
+
+  if (!el.audioPreviewModal) return;
+
+  var audioUrl = URL.createObjectURL(blob);
+  if (audioPreviewAudio) {
+    audioPreviewAudio.pause();
+    audioPreviewAudio = null;
+  }
+  audioPreviewAudio = new Audio(audioUrl);
+
+  var timeEl = document.getElementById('audio-preview-time');
+  var playBtn = document.getElementById('audio-preview-play-btn');
+  var progressFill = document.getElementById('audio-preview-progress-fill');
+  var progressContainer = document.getElementById('audio-upload-progress-container');
+
+  if (timeEl) timeEl.textContent = '0:00 / ' + fmtTime(pendingAudioDuration);
+  if (progressFill) progressFill.style.width = '0%';
+  if (progressContainer) progressContainer.classList.add('hidden');
+  if (playBtn) playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M8 5v14l11-7z"/></svg>';
+
+  var wf = document.getElementById('audio-preview-waveform');
+  if (wf) {
+    wf.innerHTML = '';
+    for (var wi = 0; wi < 28; wi++) {
+      var bar = document.createElement('span');
+      bar.className = 'wave-bar';
+      bar.style.height = (4 + Math.random() * 16) + 'px';
+      wf.appendChild(bar);
+    }
+  }
+
+  audioPreviewAudio.addEventListener('timeupdate', function() {
+    if (!audioPreviewAudio || !audioPreviewAudio.duration) return;
+    var pct = (audioPreviewAudio.currentTime / audioPreviewAudio.duration) * 100;
+    if (progressFill) progressFill.style.width = pct + '%';
+    if (timeEl) timeEl.textContent = fmtTime(audioPreviewAudio.currentTime) + ' / ' + fmtTime(pendingAudioDuration);
+  });
+
+  audioPreviewAudio.addEventListener('ended', function() {
+    if (playBtn) playBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M8 5v14l11-7z"/></svg>';
+    if (progressFill) progressFill.style.width = '0%';
+    if (timeEl) timeEl.textContent = '0:00 / ' + fmtTime(pendingAudioDuration);
+  });
+
+  el.audioPreviewModal.classList.remove('hidden');
+  el.audioPreviewModal.style.display = 'flex';
+}
+
+function hideAudioPreviewModal() {
+  if (audioPreviewAudio) {
+    audioPreviewAudio.pause();
+    audioPreviewAudio = null;
+  }
+  pendingAudioBlob = null;
+  pendingAudioDuration = 0;
+  pendingAudioMimeType = '';
+  if (el.audioPreviewModal) {
+    el.audioPreviewModal.classList.add('hidden');
+    el.audioPreviewModal.style.display = 'none';
+  }
+}
+
+function sendPendingAudio() {
+  if (!pendingAudioBlob || !currentUser) return;
+
+  var blob = pendingAudioBlob;
+  var duration = pendingAudioDuration;
+  var mimeType = pendingAudioMimeType;
+  var msgId = generateClientId();
+
+  var progressContainer = document.getElementById('audio-upload-progress-container');
+  var progressFill = document.getElementById('audio-upload-progress-fill');
+  var progressText = document.getElementById('audio-upload-progress-text');
+  var sendBtn = document.getElementById('audio-preview-send-btn');
+
+  if (sendBtn) sendBtn.disabled = true;
+  if (progressContainer) progressContainer.classList.remove('hidden');
+
+  var reader = new FileReader();
+  reader.onload = function() {
+    var base64Data = reader.result;
+
+    if (typeof firebase !== 'undefined' && firebase.storage && isOnline) {
+      try {
+        var ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+        var storageRef = firebase.storage().ref().child('voice_messages/' + msgId + '.' + ext);
+        var uploadTask = storageRef.put(blob, { contentType: mimeType });
+
+        uploadTask.on('state_changed',
+          function(snapshot) {
+            var pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+            if (progressFill) progressFill.style.width = pct + '%';
+            if (progressText) progressText.textContent = 'Subiendo audio... ' + pct + '%';
+          },
+          function(error) {
+            console.warn('Storage upload error, usando base64 fallback:', error);
+            hideAudioPreviewModal();
+            if (sendBtn) sendBtn.disabled = false;
+            sendMessage('', null, { base64: base64Data, mimeType: mimeType, duration: duration });
+          },
+          function() {
+            uploadTask.snapshot.ref.getDownloadURL().then(function(downloadURL) {
+              hideAudioPreviewModal();
+              if (sendBtn) sendBtn.disabled = false;
+              sendMessage('', null, { url: downloadURL, base64: base64Data, mimeType: mimeType, duration: duration });
+            }).catch(function() {
+              hideAudioPreviewModal();
+              if (sendBtn) sendBtn.disabled = false;
+              sendMessage('', null, { base64: base64Data, mimeType: mimeType, duration: duration });
+            });
+          }
+        );
+        return;
+      } catch(err) {
+        console.warn('Storage init failed, enviando base64:', err);
+      }
+    }
+
+    hideAudioPreviewModal();
+    if (sendBtn) sendBtn.disabled = false;
+    sendMessage('', null, { base64: base64Data, mimeType: mimeType, duration: duration });
+  };
+  reader.readAsDataURL(blob);
 }
 
 
@@ -1881,50 +2455,48 @@ function toggleEmojiPicker() {
 
 /* PROFILES */
 function loadMyProfile() {
-  if (!currentUser) return;
-  db.collection(USERS_COLLECTION).doc(currentUser.uid).get().then(function(doc) {
+  if (!currentUser) return Promise.resolve();
+  var cfg = getUserConfig();
+  return db.collection(USERS_COLLECTION).doc(currentUser.uid).get().then(function(doc) {
     if (doc.exists) {
-      var d = doc.data(); myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
-      if (myProfile.username) username = myProfile.username;
+      var d = doc.data();
+      myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
+      if (myProfile.username) { username = myProfile.username; }
+      else if (cfg) { username = cfg.name; myProfile.username = cfg.name; }
       updateMyProfileUI();
     } else {
-      db.collection(USERS_COLLECTION).where('email', '==', currentUser.email).limit(1).get().then(function(snap) {
+      return db.collection(USERS_COLLECTION).where('email', '==', currentUser.email).limit(1).get().then(function(snap) {
         if (!snap.empty) {
           var d = snap.docs[0].data();
           myProfile = { username: d.username || '', avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
-          if (myProfile.username) username = myProfile.username;
+          if (myProfile.username) { username = myProfile.username; }
+          else if (cfg) { username = cfg.name; myProfile.username = cfg.name; }
           var light = { username: myProfile.username, bio: myProfile.bio, email: currentUser.email, uid: currentUser.uid };
           db.collection(USERS_COLLECTION).doc(currentUser.uid).set(light, { merge: true }).catch(function(){});
+        } else {
+          if (cfg) { username = cfg.name; myProfile.username = cfg.name; }
         }
         updateMyProfileUI();
-      }).catch(function(){ updateMyProfileUI(); });
+      }).catch(function(){ if (cfg) { username = cfg.name; myProfile.username = cfg.name; } updateMyProfileUI(); });
     }
-  }).catch(function(){});
+  }).catch(function(){ if (cfg) { username = cfg.name; myProfile.username = cfg.name; } updateMyProfileUI(); });
 }
 function loadPartnerProfile() {
   var partner = getPartnerConfig();
   if (!partner) return;
-  db.collection(USERS_COLLECTION).where('uid', '!=', currentUser.uid).limit(1).get().then(function(snap) {
+  db.collection(USERS_COLLECTION).where('email', '==', partner.email).limit(1).get().then(function(snap) {
     if (!snap.empty) {
-      partnerRealUid = snap.docs[0].id;
       var d = snap.docs[0].data();
+      partnerRealUid = snap.docs[0].id;
       partnerProfile = { username: d.username || partner.name, avatarBase64: d.avatarBase64 || '', bio: d.bio || '' };
-    }
-    else {
-      db.collection(USERS_COLLECTION).where('email', '==', partner.email).limit(1).get().then(function(snap2) {
-        if (!snap2.empty) {
-          var d2 = snap2.docs[0].data();
-          partnerProfile = { username: d2.username || partner.name, avatarBase64: d2.avatarBase64 || '', bio: d2.bio || '' };
-          partnerRealUid = snap2.docs[0].id;
-        } else {
-          partnerProfile = { username: partner.name, avatarBase64: '', bio: '' };
-        }
-        updateMyProfileUI(); updatePartnerProfileUI(); updateHeaderBadge(null);
-      }).catch(function(){ partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; updateMyProfileUI(); updatePartnerProfileUI(); });
-      return;
+    } else {
+      partnerProfile = { username: partner.name, avatarBase64: '', bio: '' };
     }
     updateMyProfileUI(); updatePartnerProfileUI(); updateHeaderBadge(null);
-  }).catch(function(){ partnerProfile = { username: partner.name, avatarBase64: '', bio: '' }; updateMyProfileUI(); updatePartnerProfileUI(); });
+  }).catch(function(){
+    partnerProfile = { username: partner.name, avatarBase64: '', bio: '' };
+    updateMyProfileUI(); updatePartnerProfileUI();
+  });
 }
 function updateMyProfileUI() {
   if (el.profileNameInput) el.profileNameInput.value = myProfile.username || '';
@@ -1941,7 +2513,8 @@ function updatePartnerProfileUI() {
   updateHeaderPartnerAvatar();
 }
 function updateHeaderPartnerAvatar() {
-  var name = partnerProfile.username || getPartnerConfig().name || 'Mi Amor';
+  var partner = getPartnerConfig();
+  var name = partnerProfile.username || (partner && partner.name) || 'Mi Amor';
   var avatar = partnerProfile.avatarBase64 || '';
   var img = document.getElementById('header-partner-img');
   var initial = document.getElementById('header-partner-initial');
@@ -1977,6 +2550,8 @@ function saveProfile() {
       }, { merge: true });
     }
   }).then(function() {
+    updateMyProfileUI();
+    updateHeaderPartnerAvatar();
     showSuccess('Perfil guardado');
   }).catch(function(e) {
     console.error('Profile save error:', e);
@@ -2006,7 +2581,9 @@ function startDestacadosListeners() {
   if (!currentUser) return;
   var mySlot = getAssignedUser();
   if (!mySlot) return;
-  db.collection(DESTACADOS_COLLECTION).doc(mySlot).collection('items').onSnapshot(function(snap) {
+  if (myDestacadosUnsubscribe) { myDestacadosUnsubscribe(); myDestacadosUnsubscribe = null; }
+  if (partnerDestacadosUnsubscribe) { partnerDestacadosUnsubscribe(); partnerDestacadosUnsubscribe = null; }
+  myDestacadosUnsubscribe = db.collection(DESTACADOS_COLLECTION).doc(mySlot).collection('items').onSnapshot(function(snap) {
     var touchedIds = [];
     snap.docChanges().forEach(function(ch) { touchedIds.push(ch.doc.id); });
     myDestacados = []; myDestacadoIds = new Set();
@@ -2018,7 +2595,7 @@ function startDestacadosListeners() {
     });
   }, function(){});
   var partnerSlot = mySlot === 'user1' ? 'user2' : 'user1';
-  db.collection(DESTACADOS_COLLECTION).doc(partnerSlot).collection('items').onSnapshot(function(snap) {
+  partnerDestacadosUnsubscribe = db.collection(DESTACADOS_COLLECTION).doc(partnerSlot).collection('items').onSnapshot(function(snap) {
     partnerDestacados = []; partnerDestacadoIds = new Set();
     snap.forEach(function(doc) { var d = Object.assign({}, doc.data(), { id: doc.id }); partnerDestacados.push(d); partnerDestacadoIds.add(doc.id); });
   }, function(){});
@@ -2026,7 +2603,8 @@ function startDestacadosListeners() {
 function startPartnerShareSettingListener() {
   var partner = getPartnerConfig();
   if (!partner) return;
-  db.collection(SETTINGS_COLLECTION).doc(partner.key).onSnapshot(function(doc) {
+  if (partnerShareSettingUnsubscribe) { partnerShareSettingUnsubscribe(); partnerShareSettingUnsubscribe = null; }
+  partnerShareSettingUnsubscribe = db.collection(SETTINGS_COLLECTION).doc(partner.key).onSnapshot(function(doc) {
     if (doc.exists) {
       partnerShares = doc.data().shareDestacados === true;
       if (el.partnerDestacadosStatus) el.partnerDestacadosStatus.textContent = partnerShares ? 'Disponible' : 'No compartido';
@@ -2358,12 +2936,19 @@ function flushCartasOfflineQueue() {
   var q = getCartasOfflineQueue();
   if (!q.length) return;
   var remaining = [];
+  var promises = [];
   q.forEach(function(item) {
-    db.collection(CARTAS_COLLECTION).doc(item.cartaId).set(item.data).catch(function(){
+    var p = db.collection(CARTAS_COLLECTION).doc(item.cartaId).set(item.data).then(function() {
+      return true;
+    }).catch(function() {
       remaining.push(item);
+      return false;
     });
+    promises.push(p);
   });
-  saveCartasOfflineQueue(remaining);
+  Promise.allSettled(promises).then(function() {
+    saveCartasOfflineQueue(remaining);
+  });
 }
 function closeCartaReader() {
   currentCarta = null;
@@ -2384,7 +2969,7 @@ function checkScheduledCartas() {
     }
   });
 }
-setInterval(checkScheduledCartas, 60000);
+var scheduledCartasInterval = null;
 function hideCartasCompose() {
   if (el.cartasCompose) el.cartasCompose.classList.add('hidden');
   if (el.cartasNewBtn) el.cartasNewBtn.style.display = '';
@@ -2423,7 +3008,8 @@ var MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Ago
 
 function startCalendarListener() {
   if (!currentUser) return;
-  db.collection(CALENDAR_COLLECTION).onSnapshot(function(snap) {
+  if (calendarUnsubscribe) { calendarUnsubscribe(); calendarUnsubscribe = null; }
+  calendarUnsubscribe = db.collection(CALENDAR_COLLECTION).onSnapshot(function(snap) {
     calendarEvents = [];
     snap.forEach(function(doc) { calendarEvents.push(Object.assign({}, doc.data(), { id: doc.id })); });
     calendarEvents.sort(function(a, b) { return (a.date || '').localeCompare(b.date || ''); });
@@ -2514,9 +3100,11 @@ function renderCalendarEvents() {
     del.innerHTML = '✕';
     del.addEventListener('click', function(e) {
       e.stopPropagation();
-      if (confirm('¿Eliminar este evento?')) {
-        db.collection(CALENDAR_COLLECTION).doc(ev.id).delete().catch(function(){});
-      }
+      showConfirm('¿Eliminar este evento?').then(function(ok) {
+        if (ok) {
+          db.collection(CALENDAR_COLLECTION).doc(ev.id).delete().catch(function(){});
+        }
+      });
     });
     item.appendChild(icon);
     item.appendChild(info);
@@ -2674,7 +3262,7 @@ function checkRemindersDue() {
     }
   });
 }
-setInterval(checkRemindersDue, 30000);
+var remindersCheckInterval = null;
 
 /* ===== DETAILED STATISTICS ===== */
 function openDetailedStats() {
@@ -2868,7 +3456,7 @@ function drawTopDays(msgs) {
 function openMediaGallery() {
   if (!el.mediaGalleryModal || !el.mediaGalleryGrid) return;
   el.mediaGalleryGrid.innerHTML = '';
-  var images = allMessages.filter(function(m) { return m.imageBase64; });
+  var images = allMessages.filter(function(m) { return m.imageBase64 && !m.viewOnce; });
   if (!images.length) {
     el.mediaGalleryGrid.innerHTML = '<p style="text-align:center;padding:40px;color:#999;grid-column:1/-1">No hay imágenes en el chat</p>';
     el.mediaGalleryModal.style.display = 'flex';
@@ -2900,7 +3488,7 @@ function closeMediaGallery() {
   if (el.mediaGalleryModal) el.mediaGalleryModal.style.display = 'none';
 }
 function updateMediaCount() {
-  var count = allMessages.filter(function(m) { return m.imageBase64; }).length;
+  var count = allMessages.filter(function(m) { return m.imageBase64 && !m.viewOnce; }).length;
   if (el.mediaCount) el.mediaCount.textContent = count > 0 ? count : '';
 }
 function openCartasModal() {
@@ -3215,6 +3803,12 @@ document.addEventListener('DOMContentLoaded', function() {
     voiceBtn: document.getElementById('voice-btn'),
     voiceIndicator: document.getElementById('voice-recording-indicator'),
     voiceRecTime: document.getElementById('voice-rec-time'),
+    voiceRecStopBtn: document.getElementById('voice-rec-stop-btn'),
+    audioPreviewModal: document.getElementById('audio-preview-modal'),
+    audioPreviewPlayBtn: document.getElementById('audio-preview-play-btn'),
+    audioPreviewSendBtn: document.getElementById('audio-preview-send-btn'),
+    audioPreviewDiscardBtn: document.getElementById('audio-preview-discard-btn'),
+    audioPreviewCloseBtn: document.getElementById('audio-preview-close-btn'),
     pinnedBtn: document.getElementById('pinned-btn'),
     pinnedBanner: document.getElementById('pinned-banner'),
     pinnedMain: document.getElementById('pinned-main'),
@@ -3267,6 +3861,9 @@ document.addEventListener('DOMContentLoaded', function() {
     headerPartnerBio: document.getElementById('header-partner-bio'),
     headerPartnerInitial: document.getElementById('header-partner-initial'),
     themeSelect: document.getElementById('theme-select'),
+    chatBgInput: document.getElementById('chat-bg-input'),
+    chatBgPreview: document.getElementById('chat-bg-preview'),
+    chatBgClearBtn: document.getElementById('chat-bg-clear-btn'),
     myDestacadosBtn: document.getElementById('my-destacados-btn'),
     partnerDestacadosBtn: document.getElementById('partner-destacados-btn'),
     destacadosModal: document.getElementById('destacados-modal'),
@@ -3392,45 +3989,119 @@ document.addEventListener('DOMContentLoaded', function() {
     reminderSaveBtn: document.getElementById('reminder-save-btn')
   };
 
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  initTheme();
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(function() {
+    initTheme();
 
-  /* STATIC ICONS */
-  renderIcon(document.querySelector('.welcome-icon'), 'messageCircle');
-  renderIcon(document.querySelector('.drag-drop-icon'), 'upload');
-  renderIcon(document.querySelector('.scroll-icon'), 'arrowDown');
-  renderIcon(el.imageBtn && el.imageBtn.querySelector('.btn-media-inner'), 'image');
-  renderIcon(el.pinnedBtn && el.pinnedBtn.querySelector('.btn-icon-inner'), 'pin');
-  renderIcon(el.searchToggleBtn && el.searchToggleBtn.querySelector('.btn-icon-inner'), 'search');
-  renderIcon(el.moreBtn && el.moreBtn.querySelector('.btn-icon-inner'), 'more');
-  renderIcon(el.settingsBtn && el.settingsBtn.querySelector('.btn-icon-inner'), 'settings');
-  renderIcon(el.refreshBtn && el.refreshBtn.querySelector('.btn-icon-inner'), 'sync');
-  renderIcon(el.settingsCloseBtn && el.settingsCloseBtn.querySelector('.btn-icon'), 'close');
-  renderIcon(el.emojiBtn && el.emojiBtn.querySelector('.btn-emoji-inner'), 'emoji');
-  renderIcon(el.voiceBtn && el.voiceBtn.querySelector('.btn-voice-inner'), 'mic');
-  renderIcon(el.sendBtn && el.sendBtn.querySelector('.btn-send-inner'), 'send');
-  renderIcon(el.pinnedCloseBtn && el.pinnedCloseBtn.querySelector('span'), 'close');
-  renderIcon(el.searchCloseBtn && el.searchCloseBtn.querySelector('span'), 'close');
-  var rpi = el.replyPreview && el.replyPreview.querySelector('.reply-preview-close span');
-  if (rpi) renderIcon(rpi, 'close');
+    /* STATIC ICONS */
+    renderIcon(document.querySelector('.welcome-icon'), 'messageCircle');
+    renderIcon(document.querySelector('.drag-drop-icon'), 'upload');
+    renderIcon(document.querySelector('.scroll-icon'), 'arrowDown');
+    renderIcon(el.imageBtn && el.imageBtn.querySelector('.btn-media-inner'), 'image');
+    renderIcon(el.pinnedBtn && el.pinnedBtn.querySelector('.btn-icon-inner'), 'pin');
+    renderIcon(el.searchToggleBtn && el.searchToggleBtn.querySelector('.btn-icon-inner'), 'search');
+    renderIcon(el.moreBtn && el.moreBtn.querySelector('.btn-icon-inner'), 'more');
+    renderIcon(el.settingsBtn && el.settingsBtn.querySelector('.btn-icon-inner'), 'settings');
+    renderIcon(el.refreshBtn && el.refreshBtn.querySelector('.btn-icon-inner'), 'sync');
+    renderIcon(el.settingsCloseBtn && el.settingsCloseBtn.querySelector('.btn-icon'), 'close');
+    renderIcon(el.emojiBtn && el.emojiBtn.querySelector('.btn-emoji-inner'), 'emoji');
+    renderIcon(el.voiceBtn && el.voiceBtn.querySelector('.btn-voice-inner'), 'mic');
+    renderIcon(el.sendBtn && el.sendBtn.querySelector('.btn-send-inner'), 'send');
+    renderIcon(el.pinnedCloseBtn && el.pinnedCloseBtn.querySelector('span'), 'close');
+    renderIcon(el.searchCloseBtn && el.searchCloseBtn.querySelector('span'), 'close');
+    var rpi = el.replyPreview && el.replyPreview.querySelector('.reply-preview-close span');
+    if (rpi) renderIcon(rpi, 'close');
 
-  /* LOGIN */
-  if (el.loginForm) el.loginForm.addEventListener('submit', function(e) {
-    e.preventDefault();
-    var pw = el.loginPassword ? el.loginPassword.value.trim() : '';
-    if (!pw) { if (el.loginError) { el.loginError.textContent = 'Ingresa la clave'; el.loginError.style.display = 'block'; } return; }
-    if (el.loginError) el.loginError.style.display = 'none';
-    if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = true; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrando...'; }
-    tryLoginWithPassword(pw).catch(function(err) {
-      console.error('Login error:', err);
-      if (el.loginError) { el.loginError.textContent = 'Clave incorrecta'; el.loginError.style.display = 'block'; }
-      if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
-      if (el.loginPassword) el.loginPassword.value = '';
+    /* LOGIN */
+    if (el.loginForm) el.loginForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      var pw = el.loginPassword ? el.loginPassword.value.trim() : '';
+      if (!pw) { if (el.loginError) { el.loginError.textContent = 'Ingresa la clave'; el.loginError.style.display = 'block'; } return; }
+      if (el.loginError) el.loginError.style.display = 'none';
+      if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = true; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrando...'; }
+      tryLoginWithPassword(pw).then(function() {
+        try { sessionStorage.setItem('chatpareja_refresh_pw', pw); } catch(e){}
+      }).catch(function(err) {
+        console.error('Login error:', err);
+        if (el.loginError) { el.loginError.textContent = 'Clave incorrecta'; el.loginError.style.display = 'block'; }
+        if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
+        if (el.loginPassword) el.loginPassword.value = '';
+      });
+    });
+
+    auth.onAuthStateChanged(function(user) { checkUserAccess(user); });
+    tryAutoLogin();
+
+  /* PAIRING */
+  var pairingGenerateBtn = document.getElementById('pairing-generate-btn');
+  if (pairingGenerateBtn) pairingGenerateBtn.addEventListener('click', function() {
+    var btn = pairingGenerateBtn;
+    btn.disabled = true;
+    var btnText = btn.querySelector('.btn-text');
+    if (btnText) btnText.textContent = 'Generando...';
+    createPairingAsOwner(currentUser.uid).then(function(code) {
+      pairingState = 'show_code';
+      showPairingModal('show_code');
+      var codeDisplay = document.getElementById('pairing-code-display');
+      if (codeDisplay) codeDisplay.textContent = code;
+      btn.disabled = false;
+      if (btnText) btnText.textContent = 'Generar código';
+    }).catch(function(e) {
+      console.error('Pairing error:', e);
+      btn.disabled = false;
+      if (btnText) btnText.textContent = 'Generar código';
+      showError('No se pudo generar el código');
     });
   });
-
-  auth.onAuthStateChanged(function(user) { checkUserAccess(user); });
-  tryAutoLogin();
+  var pairingCopyBtn = document.getElementById('pairing-copy-btn');
+  if (pairingCopyBtn) pairingCopyBtn.addEventListener('click', function() {
+    var codeDisplay = document.getElementById('pairing-code-display');
+    var code = codeDisplay ? codeDisplay.textContent : '';
+    navigator.clipboard.writeText(code).then(function() {
+      var btnText = pairingCopyBtn.querySelector('.btn-text');
+      var original = btnText ? btnText.textContent : '';
+      if (btnText) btnText.textContent = '¡Copiado!';
+      setTimeout(function() { if (btnText) btnText.textContent = original; }, 2000);
+    }).catch(function() {});
+  });
+  var pairingSubmitBtn = document.getElementById('pairing-submit-btn');
+  if (pairingSubmitBtn) pairingSubmitBtn.addEventListener('click', function() {
+    var input = document.getElementById('pairing-code-input');
+    var code = input ? input.value.trim() : '';
+    var errorEl = document.getElementById('pairing-error');
+    var btn = pairingSubmitBtn;
+    if (!code || code.length !== 6) {
+      if (errorEl) { errorEl.textContent = 'Ingresa un código de 6 dígitos'; errorEl.classList.remove('hidden'); }
+      return;
+    }
+    btn.disabled = true;
+    var btnText = btn.querySelector('.btn-text');
+    if (btnText) btnText.textContent = 'Uniendo...';
+    joinPairingAsPartner(currentUser.uid, code).then(function() {
+      pairingState = 'paired';
+      showPairingModal('success');
+      var successText = document.getElementById('pairing-success-text');
+      if (successText) successText.textContent = 'Ya pueden chatear juntos 💕';
+      btn.disabled = false;
+      if (btnText) btnText.textContent = 'Unirse';
+    }).catch(function(e) {
+      console.error('Join pairing error:', e);
+      if (errorEl) { errorEl.textContent = e.message || 'Error al unirse'; errorEl.classList.remove('hidden'); }
+      btn.disabled = false;
+      if (btnText) btnText.textContent = 'Unirse';
+    });
+  });
+  var pairingContinueBtn = document.getElementById('pairing-continue-btn');
+  if (pairingContinueBtn) pairingContinueBtn.addEventListener('click', function() {
+    hidePairingModal();
+    hideLoginScreen();
+    initializeUser();
+  });
+  var pairingCodeInput = document.getElementById('pairing-code-input');
+  if (pairingCodeInput) pairingCodeInput.addEventListener('input', function() {
+    this.value = this.value.replace(/\D/g, '').slice(0, 6);
+    var errorEl = document.getElementById('pairing-error');
+    if (errorEl) errorEl.classList.add('hidden');
+  });
 
   /* CHAT FORM */
   if (el.chatForm) el.chatForm.addEventListener('submit', function(e) {
@@ -3467,17 +4138,102 @@ document.addEventListener('DOMContentLoaded', function() {
   var chipRemoveBtn = document.getElementById('image-chip-remove');
   if (chipRemoveBtn) chipRemoveBtn.addEventListener('click', function() { hideImagePreviewModal(); hideImageChip(); });
 
-  /* VOICE */
+  /* VOICE RECORDING & PREVIEW EVENTS */
   var voiceTimer = null;
+  var isHoldingVoiceBtn = false;
+
   if (el.voiceBtn) {
-    el.voiceBtn.addEventListener('mousedown', function() { voiceTimer = setTimeout(startVoiceRecording, 300); });
-    el.voiceBtn.addEventListener('mouseup', function() { clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
-    el.voiceBtn.addEventListener('mouseleave', function() { clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
-    el.voiceBtn.addEventListener('touchstart', function(e) { e.preventDefault(); voiceTimer = setTimeout(startVoiceRecording, 300); }, { passive: false });
-    el.voiceBtn.addEventListener('touchend', function(e) { e.preventDefault(); clearTimeout(voiceTimer); if (state.mediaRecorder && state.mediaRecorder.state === 'recording') stopVoiceRecording(); });
+    el.voiceBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isHoldingVoiceBtn) {
+        isHoldingVoiceBtn = false;
+        return;
+      }
+      if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
+        stopVoiceRecording();
+      } else {
+        startVoiceRecording();
+      }
+    });
+
+    el.voiceBtn.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      clearTimeout(voiceTimer);
+      voiceTimer = setTimeout(function() {
+        isHoldingVoiceBtn = true;
+        startVoiceRecording();
+      }, 300);
+    });
+
+    el.voiceBtn.addEventListener('mouseup', function() {
+      clearTimeout(voiceTimer);
+      if (isHoldingVoiceBtn) {
+        stopVoiceRecording();
+        setTimeout(function() { isHoldingVoiceBtn = false; }, 100);
+      }
+    });
+
+    el.voiceBtn.addEventListener('mouseleave', function() {
+      clearTimeout(voiceTimer);
+      if (isHoldingVoiceBtn) {
+        stopVoiceRecording();
+        setTimeout(function() { isHoldingVoiceBtn = false; }, 100);
+      }
+    });
+
+    el.voiceBtn.addEventListener('touchstart', function(e) {
+      clearTimeout(voiceTimer);
+      voiceTimer = setTimeout(function() {
+        isHoldingVoiceBtn = true;
+        startVoiceRecording();
+      }, 300);
+    }, { passive: true });
+
+    el.voiceBtn.addEventListener('touchend', function(e) {
+      clearTimeout(voiceTimer);
+      if (isHoldingVoiceBtn) {
+        e.preventDefault();
+        stopVoiceRecording();
+        setTimeout(function() { isHoldingVoiceBtn = false; }, 100);
+      }
+    });
   }
+
+  var vstop = document.getElementById('voice-rec-stop-btn');
+  if (vstop) vstop.addEventListener('click', stopVoiceRecording);
+
   var vrc = document.getElementById('voice-rec-cancel-btn');
   if (vrc) vrc.addEventListener('click', cancelVoiceRecording);
+
+  var apPlay = document.getElementById('audio-preview-play-btn');
+  if (apPlay) {
+    apPlay.addEventListener('click', function() {
+      if (!audioPreviewAudio) return;
+      if (audioPreviewAudio.paused) {
+        if (currentlyPlayingAudio && currentlyPlayingAudio !== audioPreviewAudio) {
+          try { currentlyPlayingAudio.pause(); } catch(err){}
+        }
+        currentlyPlayingAudio = audioPreviewAudio;
+        audioPreviewAudio.play().then(function() {
+          apPlay.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>';
+        }).catch(function(){});
+      } else {
+        audioPreviewAudio.pause();
+        if (currentlyPlayingAudio === audioPreviewAudio) currentlyPlayingAudio = null;
+        apPlay.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M8 5v14l11-7z"/></svg>';
+      }
+    });
+  }
+
+  var apSend = document.getElementById('audio-preview-send-btn');
+  if (apSend) apSend.addEventListener('click', sendPendingAudio);
+
+  var apDiscard = document.getElementById('audio-preview-discard-btn');
+  if (apDiscard) apDiscard.addEventListener('click', hideAudioPreviewModal);
+
+  var apClose = document.getElementById('audio-preview-close-btn');
+  if (apClose) apClose.addEventListener('click', hideAudioPreviewModal);
 
   /* EMOJI */
   if (el.emojiBtn) el.emojiBtn.addEventListener('click', toggleEmojiPicker);
@@ -3770,7 +4526,7 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.detailedStatsModal) el.detailedStatsModal.addEventListener('click', function(e) { if (e.target === el.detailedStatsModal) el.detailedStatsModal.style.display = 'none'; });
 
   /* REMINDERS */
-  if (el.remindersRow) el.remindersRow = document.getElementById('reminders-row');
+  el.remindersRow = document.getElementById('reminders-row');
   if (el.remindersRow) el.remindersRow.addEventListener('click', function() { closeMoreModal(); openRemindersModal(); });
   if (el.remindersCloseBtn) el.remindersCloseBtn.addEventListener('click', closeRemindersModal);
   if (el.remindersModal) el.remindersModal.addEventListener('click', function(e) { if (e.target === el.remindersModal) closeRemindersModal(); });
@@ -3863,6 +4619,170 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.themeSelect) el.themeSelect.addEventListener('change', function(e) { setTheme(e.target.value); });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
     var t = 'system'; try { t = localStorage.getItem('chatpareja_theme') || 'system'; } catch(e){} if (t === 'system') initTheme();
+  });
+
+  /* CHAT BACKGROUND (INDEXEDDB + STORAGE PERSISTENCE) */
+  var ChatBgStorage = (function() {
+    var DB_NAME = 'ChatParejaBgDB';
+    var STORE_NAME = 'wallpapers';
+    var KEY = 'current_bg';
+
+    function openDB() {
+      return new Promise(function(resolve, reject) {
+        if (!window.indexedDB) { reject(new Error('No IndexedDB')); return; }
+        var req = window.indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = function(e) {
+          var db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+          }
+        };
+        req.onsuccess = function(e) { resolve(e.target.result); };
+        req.onerror = function(e) { reject(e.target.error); };
+      });
+    }
+
+    return {
+      save: function(dataUrl) {
+        return openDB().then(function(db) {
+          return new Promise(function(resolve, reject) {
+            var tx = db.transaction(STORE_NAME, 'readwrite');
+            var store = tx.objectStore(STORE_NAME);
+            var req = store.put(dataUrl, KEY);
+            req.onsuccess = function() { resolve(); };
+            req.onerror = function(e) { reject(e.target.error); };
+          });
+        }).catch(function(err) {
+          console.warn('IndexedDB save fallback to localStorage:', err);
+          try { localStorage.setItem('chatpareja_custom_bg', dataUrl); } catch(e){}
+        });
+      },
+      get: function() {
+        return openDB().then(function(db) {
+          return new Promise(function(resolve, reject) {
+            var tx = db.transaction(STORE_NAME, 'readonly');
+            var store = tx.objectStore(STORE_NAME);
+            var req = store.get(KEY);
+            req.onsuccess = function(e) { resolve(e.target.result); };
+            req.onerror = function(e) { reject(e.target.error); };
+          });
+        }).catch(function() {
+          try { return localStorage.getItem('chatpareja_custom_bg'); } catch(e){ return null; }
+        });
+      },
+      clear: function() {
+        return openDB().then(function(db) {
+          return new Promise(function(resolve, reject) {
+            var tx = db.transaction(STORE_NAME, 'readwrite');
+            var store = tx.objectStore(STORE_NAME);
+            var req = store.delete(KEY);
+            req.onsuccess = function() { resolve(); };
+            req.onerror = function(e) { reject(e.target.error); };
+          });
+        }).catch(function() {
+          try { localStorage.removeItem('chatpareja_custom_bg'); } catch(e){}
+        });
+      }
+    };
+  })();
+
+  function applyChatBackground(base64) {
+    var mc = document.getElementById('messages-container');
+    if (!mc) return;
+    if (base64) {
+      mc.style.backgroundImage = 'url("' + base64 + '")';
+      mc.classList.add('chat-bg-active');
+      if (el && el.chatBgPreview) {
+        el.chatBgPreview.style.backgroundImage = 'url("' + base64 + '")';
+        el.chatBgPreview.classList.add('has-image');
+      }
+      if (el && el.chatBgClearBtn) el.chatBgClearBtn.classList.remove('hidden');
+    } else {
+      mc.style.backgroundImage = '';
+      mc.classList.remove('chat-bg-active');
+      if (el && el.chatBgPreview) {
+        el.chatBgPreview.style.backgroundImage = '';
+        el.chatBgPreview.classList.remove('has-image');
+      }
+      if (el && el.chatBgClearBtn) el.chatBgClearBtn.classList.add('hidden');
+    }
+  }
+
+  function initChatBackground() {
+    ChatBgStorage.get().then(function(savedBg) {
+      if (savedBg) {
+        applyChatBackground(savedBg);
+      }
+    });
+    loadChatBackground();
+  }
+
+  function loadChatBackground() {
+    if (!currentUser) return;
+    db.collection(USERS_COLLECTION).doc(currentUser.uid).get().then(function(doc) {
+      if (doc.exists && doc.data().chatBgBase64) {
+        var cloudBg = doc.data().chatBgBase64;
+        applyChatBackground(cloudBg);
+        ChatBgStorage.save(cloudBg);
+      }
+    }).catch(function(e) { console.error('Chat bg load error:', e); });
+  }
+
+  function clearChatBackground() {
+    applyChatBackground('');
+    ChatBgStorage.clear();
+    showSuccess('Fondo restablecido');
+    if (!currentUser) return;
+    db.collection(USERS_COLLECTION).doc(currentUser.uid).set({ chatBgBase64: firebase.firestore.FieldValue.delete() }, { merge: true }).catch(function(){});
+  }
+
+  function resizeBackgroundImage(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        var img = new Image();
+        img.onload = function() {
+          var MAX = 1200, w = img.width, h = img.height;
+          if (w > MAX || h > MAX) {
+            if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+            else { w = Math.round(w * MAX / h); h = MAX; }
+          }
+          var c = document.createElement('canvas');
+          c.width = w; c.height = h;
+          var ctx = c.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          var mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+          var dataUrl = c.toDataURL(mime, 0.82);
+          resolve(dataUrl);
+        };
+        img.onerror = function() { reject(new Error('Error al cargar imagen')); };
+        img.src = ev.target.result;
+      };
+      reader.onerror = function() { reject(new Error('Error al leer archivo')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  initChatBackground();
+
+  if (el.chatBgInput) el.chatBgInput.addEventListener('change', function(e) {
+    if (!e.target.files || !e.target.files[0]) return;
+    resizeBackgroundImage(e.target.files[0]).then(function(dataUrl) {
+      applyChatBackground(dataUrl);
+      ChatBgStorage.save(dataUrl);
+      showSuccess('Fondo actualizado');
+      if (currentUser) {
+        db.collection(USERS_COLLECTION).doc(currentUser.uid).set({ chatBgBase64: dataUrl }, { merge: true }).catch(function(err) {
+          console.warn('Firestore bg backup warn:', err);
+        });
+      }
+      e.target.value = '';
+    }).catch(function() { showError('Error al procesar imagen'); });
+  });
+  if (el.chatBgClearBtn) el.chatBgClearBtn.addEventListener('click', clearChatBackground);
+  }).catch(function(err) {
+    console.error('Auth persistence error:', err);
+    initTheme();
   });
 });
 

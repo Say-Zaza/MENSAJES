@@ -2,6 +2,166 @@ const fs = require("fs");
 const path = require("path");
 const syncService = require("../sync-service.js");
 
+function testPairingSystemIntegrity() {
+  console.log("\n🔒 VERIFICACIÓN DE INTEGRIDAD DEL SISTEMA DE EMPAREJAMIENTO");
+  console.log("-------------------------------------------------");
+  let passed = 0;
+  let failed = 0;
+
+  // Test 1: app.js contiene funciones de emparejamiento
+  const appJs = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+  const requiredFunctions = [
+    "generatePairingCode",
+    "savePairingCodeLocal",
+    "loadPairingCodeLocal",
+    "clearPairingCodeLocal",
+    "checkPairingStatus",
+    "getPairedUsersCount",
+    "createPairingAsOwner",
+    "joinPairingAsPartner",
+    "showPairingModal",
+    "hidePairingModal"
+  ];
+  for (const fn of requiredFunctions) {
+    if (appJs.includes("function " + fn)) {
+      console.log(`  ✅ ${fn} existe en app.js`);
+      passed++;
+    } else {
+      console.error(`  ❌ ${fn} NO existe en app.js`);
+      failed++;
+    }
+  }
+
+  // Test 2: app.js contiene constantes de emparejamiento
+  const requiredVars = ["PAIRING_COLLECTION", "PAIRING_CODE_KEY", "PAIRING_CODE_TTL"];
+  for (const v of requiredVars) {
+    if (appJs.includes(v)) {
+      console.log(`  ✅ ${v} definido en app.js`);
+      passed++;
+    } else {
+      console.error(`  ❌ ${v} NO definido en app.js`);
+      failed++;
+    }
+  }
+
+  // Test 3: app.js contiene estado de emparejamiento
+  if (appJs.includes("pairingState")) {
+    console.log("  ✅ pairingState definido en app.js");
+    passed++;
+  } else {
+    console.error("  ❌ pairingState NO definido en app.js");
+    failed++;
+  }
+
+  // Test 4: firestore.rules contiene isPairedUser
+  const rules = fs.readFileSync(path.join(__dirname, "..", "firestore.rules"), "utf8");
+  if (rules.includes("isPairedUser")) {
+    console.log("  ✅ firestore.rules contiene isPairedUser");
+    passed++;
+  } else {
+    console.error("  ❌ firestore.rules NO contiene isPairedUser");
+    failed++;
+  }
+
+  // Test 5: firestore.rules contiene isAllowedAccount (limita a 2 cuentas fijas)
+  if (rules.includes("isAllowedAccount")) {
+    console.log("  ✅ firestore.rules limita a 2 cuentas fijas via isAllowedAccount");
+    passed++;
+  } else {
+    console.error("  ❌ firestore.rules NO limita a cuentas fijas");
+    failed++;
+  }
+
+  // Test 6: firestore.rules requiere isPairedUser para mensajes
+  if (rules.includes("isPairedUser(roomId, request.auth.uid)") && rules.includes("match /rooms/{roomId}/messages")) {
+    console.log("  ✅ firestore.rules requiere emparejamiento para mensajes");
+    passed++;
+  } else {
+    console.error("  ❌ firestore.rules NO requiere emparejamiento para mensajes");
+    failed++;
+  }
+
+  // Test 7: UIDs correctos en sync-service.js
+  const syncContent = fs.readFileSync(path.join(__dirname, "..", "sync-service.js"), "utf8");
+  if (syncContent.includes("Wo9mPGZOafccEETULDr2aFTzjV03") && syncContent.includes("cGHUgMDtcnboB74AlaqgWMxs9w82")) {
+    console.log("  ✅ sync-service.js usa UIDs correctos de Firebase Auth");
+    passed++;
+  } else {
+    console.error("  ❌ sync-service.js tiene UIDs incorrectos");
+    failed++;
+  }
+
+  // Test 8: index.html contiene pairing-modal
+  const indexHtml = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  if (indexHtml.includes("pairing-modal") && indexHtml.includes("pairing-step-generate") && indexHtml.includes("pairing-step-enter") && indexHtml.includes("pairing-step-full") && indexHtml.includes("pairing-step-success")) {
+    console.log("  ✅ index.html contiene modal de emparejamiento completo");
+    passed++;
+  } else {
+    console.error("  ❌ index.html NO contiene modal de emparejamiento completo");
+    failed++;
+  }
+
+  // Test 9: style.css contiene estilos de pairing
+  const styleCss = fs.readFileSync(path.join(__dirname, "..", "style.css"), "utf8");
+  if (styleCss.includes(".pairing-modal") && styleCss.includes(".pairing-code-display") && styleCss.includes(".pairing-code-input")) {
+    console.log("  ✅ style.css contiene estilos de emparejamiento");
+    passed++;
+  } else {
+    console.error("  ❌ style.css NO contiene estilos de emparejamiento");
+    failed++;
+  }
+
+  // Test 11: Sistema de audio en app.js
+  const audioFns = [
+    "startVoiceRecording",
+    "stopVoiceRecording",
+    "cancelVoiceRecording",
+    "showAudioPreviewModal",
+    "sendPendingAudio",
+    "getSupportedAudioMimeType"
+  ];
+  for (const fn of audioFns) {
+    if (appJs.includes("function " + fn)) {
+      console.log(`  ✅ Audio: ${fn} existe en app.js`);
+      passed++;
+    } else {
+      console.error(`  ❌ Audio: ${fn} NO existe en app.js`);
+      failed++;
+    }
+  }
+
+  // Test 12: index.html contiene elementos de audio
+  if (indexHtml.includes("audio-preview-modal") && indexHtml.includes("voice-btn") && indexHtml.includes("voice-rec-stop-btn")) {
+    console.log("  ✅ index.html contiene modal de vista previa y botones de audio");
+    passed++;
+  } else {
+    console.error("  ❌ index.html NO contiene elementos de audio necesarios");
+    failed++;
+  }
+
+  // Test 14: Gestión y persistencia del fondo del chat
+  const bgFns = ["ChatBgStorage", "applyChatBackground", "initChatBackground", "clearChatBackground"];
+  for (const fn of bgFns) {
+    if (appJs.includes(fn)) {
+      console.log(`  ✅ Fondo: ${fn} existe en app.js`);
+      passed++;
+    } else {
+      console.error(`  ❌ Fondo: ${fn} NO existe en app.js`);
+      failed++;
+    }
+  }
+  if (styleCss.includes(".chat-messages.chat-bg-active") && !styleCss.includes("body.dark-mode .chat-messages.chat-bg-active { background-image: none !important; }")) {
+    console.log("  ✅ style.css permite renderizar background-image en .chat-messages.chat-bg-active");
+    passed++;
+  } else {
+    console.error("  ❌ style.css bloquea el fondo de chat con background-image: none !important");
+    failed++;
+  }
+
+  console.log(`\n  RESULTADO: ${passed} pasados, ${failed} fallados`);
+  return { passed, failed };
+}
+
 async function runLoopingTest(iterations = 3) {
   console.log("=================================================");
   console.log(`🧪 INICIANDO VERIFICACIÓN EN BUCLE (${iterations} CICLOS)`);
@@ -84,5 +244,13 @@ async function runLoopingTest(iterations = 3) {
   }
 }
 
+// Ejecutar verificación de integridad del sistema de emparejamiento
+const pairingResult = testPairingSystemIntegrity();
+
 // Ejecutar 3 bucles de verificación
-runLoopingTest(3);
+runLoopingTest(3).then(() => {
+  if (pairingResult.failed > 0) {
+    console.error("\n❌ PRUEBAS DE EMPAREJAMIENTO FALLARON");
+    process.exit(1);
+  }
+});
