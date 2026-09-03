@@ -1280,7 +1280,6 @@ function buildBubbleContent(msg, bubble, isSelf) {
   if (msg.imageBase64) {
     var iw = document.createElement('div');
     iw.className = 'message-image-wrapper';
-    if (msg.imageWidth && msg.imageHeight) iw.style.aspectRatio = msg.imageWidth + ' / ' + msg.imageHeight;
     var isMine = msg.uid === currentUser.uid;
     var showPlaceholder = msg.viewOnce && !isMine;
     if (showPlaceholder && msg.viewOnceViewed) {
@@ -1327,8 +1326,7 @@ function buildBubbleContent(msg, bubble, isSelf) {
   } else if (msg.imageGifUrl) {
     var gw = document.createElement('div');
     gw.className = 'message-image-wrapper gif-wrapper';
-    if (msg.imageWidth && msg.imageHeight) gw.style.aspectRatio = msg.imageWidth + ' / ' + msg.imageHeight;
-    else gw.style.minHeight = '160px';
+    gw.style.minHeight = '160px';
     var gi = document.createElement('img');
     gi.src = msg.imageGifUrl; gi.alt = 'GIF'; gi.className = 'message-image loaded';
     gi.loading = 'lazy';
