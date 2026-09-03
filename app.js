@@ -4143,6 +4143,14 @@ document.addEventListener('DOMContentLoaded', function() {
     auth.onAuthStateChanged(function(user) { checkUserAccess(user); });
     tryAutoLogin();
 
+    document.addEventListener('visibilitychange', function() {
+      if (document.hidden && currentUser) {
+        try { sessionStorage.removeItem('chatpareja_refresh_pw'); } catch(e){}
+        cleanupListeners();
+        auth.signOut().then(function() { showLoginScreen(); });
+      }
+    });
+
   /* PAIRING */
   var pairingGenerateBtn = document.getElementById('pairing-generate-btn');
   if (pairingGenerateBtn) pairingGenerateBtn.addEventListener('click', function() {

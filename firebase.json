@@ -13,7 +13,8 @@
       "storage.rules",
       "sync-config.json",
       "create-accounts.js",
-      "serviceAccountKey.json"
+      "serviceAccountKey.json",
+      "start-server.bat"
     ],
     "rewrites": [
       {
