@@ -1281,12 +1281,18 @@ function buildBubbleContent(msg, bubble, isSelf) {
     var iw = document.createElement('div');
     iw.className = 'message-image-wrapper';
     var isMine = msg.uid === currentUser.uid;
-    var showPlaceholder = msg.viewOnce && !isMine;
+    var showPlaceholder = msg.viewOnce;
     if (showPlaceholder && msg.viewOnceViewed) {
       var viewedEl = document.createElement('div');
       viewedEl.className = 'viewonce-viewed';
       viewedEl.innerHTML = '<span class="material-symbols-outlined" style="font-size:16px;">visibility_off</span> Imagen vista';
       iw.appendChild(viewedEl);
+      iw.style.aspectRatio = 'auto';
+    } else if (showPlaceholder && isMine) {
+      var sentPh = document.createElement('div');
+      sentPh.className = 'viewonce-placeholder';
+      sentPh.innerHTML = '<span class="material-symbols-outlined viewonce-icon">visibility</span><span class="viewonce-label">Ver una vez - enviada</span>';
+      iw.appendChild(sentPh);
       iw.style.aspectRatio = 'auto';
     } else if (showPlaceholder) {
       var ph = document.createElement('div');
@@ -1313,12 +1319,6 @@ function buildBubbleContent(msg, bubble, isSelf) {
         openLightbox(msg.imageBase64, imgs, idx >= 0 ? idx : 0);
       });
       iw.appendChild(im);
-      if (msg.viewOnce && isMine) {
-        var badge = document.createElement('div');
-        badge.className = 'viewonce-sent-badge';
-        badge.innerHTML = '<span class="material-symbols-outlined">visibility</span> Ver una vez';
-        iw.appendChild(badge);
-      }
     }
     bubble.appendChild(iw);
     if (msg.texto && !showPlaceholder) { var c = document.createElement('span'); c.className = 'msg-caption'; c.textContent = getPlainText(msg); bubble.appendChild(c); }
