@@ -711,7 +711,8 @@ body.dark-mode .msg-pin { color: #fcd34d; }
 .message-wrapper.self .message-bubble.has-image { background: transparent !important; }
 .message-wrapper.other .message-bubble.has-image { background: transparent !important; border: none !important; }
 .message-bubble.has-image .message-text { padding: 6px 8px 2px; }
-.msg-caption { display: block; padding: 6px 8px 2px; font-size: 0.85rem; color: #fff; }
+.msg-caption { display: block; padding: 6px 8px 4px; font-size: 0.85rem; color: var(--color-text-main); background: rgba(255,255,255,0.85); word-wrap: break-word; }
+body.dark-mode .msg-caption { background: rgba(0,0,0,0.65); color: var(--color-text-main); }
 
 /* ============================================
    VOICE MESSAGE PLAYER (WhatsApp Style)
