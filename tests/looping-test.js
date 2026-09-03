@@ -158,6 +158,43 @@ function testPairingSystemIntegrity() {
     failed++;
   }
 
+  // Test 15: Compresión y manejo de imágenes pesadas
+  const imgFns = ["compressImageToBase64", "sendPendingImages", "sendToFirestoreOrQueue", "retrySendMessage"];
+  for (const fn of imgFns) {
+    if (appJs.includes(fn)) {
+      console.log(`  ✅ Imagen: ${fn} existe en app.js`);
+      passed++;
+    } else {
+      console.error(`  ❌ Imagen: ${fn} NO existe en app.js`);
+      failed++;
+    }
+  }
+  // Verificar compresión limita a MAX 1600px (no 4096px antiguo)
+  if (appJs.includes("var MAX = 1600") && !appJs.includes("var MAX = 4096")) {
+    console.log("  ✅ Imagen: compressImageToBase64 usa MAX=1600px (correcto)");
+    passed++;
+  } else {
+    console.error("  ❌ Imagen: compressImageToBase64 sigue usando MAX=4096px (bug)");
+    failed++;
+  }
+  // Verificar que existe el estado 'error' y retrySendMessage
+  if (appJs.includes("status = 'error'") && appJs.includes("retrySendMessage")) {
+    console.log("  ✅ Imagen: manejo de estado 'error' y reintentar están implementados");
+    passed++;
+  } else {
+    console.error("  ❌ Imagen: faltan estado 'error' o función retrySendMessage");
+    failed++;
+  }
+  // Verificar límite server.js
+  const serverJs = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  if (serverJs.includes("limit: '20mb'")) {
+    console.log("  ✅ server.js: límite de payload Express es 20mb (correcto)");
+    passed++;
+  } else {
+    console.error("  ❌ server.js: límite de payload Express no está configurado a 20mb");
+    failed++;
+  }
+
   console.log(`\n  RESULTADO: ${passed} pasados, ${failed} fallados`);
   return { passed, failed };
 }

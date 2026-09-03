@@ -9,6 +9,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Permite payloads de hasta 20 MB para respaldos locales con imágenes comprimidas
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
+
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'database.json');
 const MEDIA_DIR = path.join(__dirname, 'media');
