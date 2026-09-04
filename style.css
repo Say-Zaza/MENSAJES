@@ -3811,8 +3811,6 @@ body.dark-mode .stats-top-day { background: var(--bg-card-hover); }
   .btn-emoji, .btn-media, .btn-voice { width: 30px; height: 30px; }
   .btn-send { width: 32px; height: 32px; }
   .message-bubble { font-size: 0.82rem; padding: 6px 8px; }
-  .message-wrapper.self .message-bubble { max-width: 85%; }
-  .message-wrapper.other .message-bubble { max-width: 85%; }
   .wishlist-add-row { flex-wrap: wrap; }
   .wishlist-input { flex: 1 1 100%; }
   .wishlist-add-row .profile-btn { width: 100%; justify-content: center; }
