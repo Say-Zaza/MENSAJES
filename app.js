@@ -150,6 +150,44 @@ function showInfo(msg) {
   document.body.appendChild(t);
   setTimeout(function(){ t.remove(); }, 3500);
 }
+function showReminderPopup(title, preMin) {
+  if (splashVisible) return;
+  var old = document.querySelector('.reminder-popup');
+  if (old) old.remove();
+  var p = document.createElement('div');
+  p.className = 'reminder-popup';
+  var icon = document.createElement('div');
+  icon.className = 'reminder-popup-icon';
+  icon.textContent = preMin ? '🔔' : '⏰';
+  var body = document.createElement('div');
+  body.className = 'reminder-popup-body';
+  var label = document.createElement('div');
+  label.className = 'reminder-popup-label';
+  label.textContent = preMin ? ('Recordatorio · en ' + preMin + ' min') : 'Recordatorio · ahora';
+  var name = document.createElement('div');
+  name.className = 'reminder-popup-title';
+  name.textContent = title || 'Recordatorio';
+  body.appendChild(label);
+  body.appendChild(name);
+  var close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'reminder-popup-close';
+  close.textContent = '✕';
+  var dismissed = false;
+  function dismiss() {
+    if (dismissed) return;
+    dismissed = true;
+    p.classList.add('hide');
+    setTimeout(function() { p.remove(); }, 320);
+  }
+  close.addEventListener('click', function(e) { e.stopPropagation(); dismiss(); });
+  p.addEventListener('click', function() { dismiss(); if (typeof openRemindersModal === 'function') openRemindersModal(); });
+  p.appendChild(icon);
+  p.appendChild(body);
+  p.appendChild(close);
+  document.body.appendChild(p);
+  setTimeout(dismiss, 9000);
+}
 function showConfirm(message) {
   return new Promise(function(resolve) {
     var overlay = document.createElement('div');
@@ -3389,12 +3427,12 @@ function checkRemindersDue() {
     var preMs = preMin * 60 * 1000;
     if (r.remindAtMs > now && preMs > 0 && (r.remindAtMs - now) <= preMs && !r._preNotified) {
       r._preNotified = true;
-      showSuccess('🔔 En ' + preMin + ' min: ' + (r.title || 'Recordatorio'));
+      showReminderPopup(r.title || 'Recordatorio', preMin);
       return;
     }
     if (r.remindAtMs <= now && (!r._lastNotifiedMs || (now - r._lastNotifiedMs) >= REMINDER_NAG_MS)) {
       r._lastNotifiedMs = now;
-      showSuccess('⏰ ' + (r.title || 'Recordatorio'));
+      showReminderPopup(r.title || 'Recordatorio', 0);
       if (r.repeat) {
         var nextDay = new Date(r.remindAtMs);
         nextDay.setDate(nextDay.getDate() + 1);
