@@ -3238,7 +3238,14 @@ function saveCalendarEvent() {
     title: title, date: date, type: type, repeat: repeat,
     createdAtMs: Date.now(), createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     uid: currentUser.uid, autor: username || ''
-  }).then(function() {
+  }).then(function(docRef) {
+    calendarEvents.push({ id: docRef.id, title: title, date: date, type: type, repeat: repeat, uid: currentUser.uid });
+    calendarEvents.sort(function(a, b) { return (a.date || '').localeCompare(b.date || ''); });
+    if (el.calendarCount) el.calendarCount.textContent = calendarEvents.length || '';
+    try {
+      var parts = date.split('-');
+      if (parts.length === 3) { calendarYear = parseInt(parts[0], 10); calendarMonth = parseInt(parts[1], 10) - 1; }
+    } catch(e){}
     showSuccess('Evento guardado');
     if (el.eventModal) { el.eventModal.classList.add('hidden'); el.eventModal.style.display = 'none'; }
     renderCalendar();
