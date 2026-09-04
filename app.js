@@ -4420,7 +4420,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var splashScreen = document.getElementById('splash-screen');
   if (splashEnterBtn && splashScreen) {
     splashEnterBtn.addEventListener('click', function() {
-      setTimeout(function() { splashScreen.classList.add('hidden'); splashVisible = false; }, 7000);
+      setTimeout(function() { splashScreen.classList.add('hidden'); splashVisible = false; showLoginScreen(); }, 7000);
     });
   }
 
