@@ -47,6 +47,13 @@ var replyToMessage = null;
 var isFirstMessage = true;
 var isOnline = navigator.onLine;
 var unreadCount = 0;
+var nativePickerOpenAt = 0;
+var NATIVE_PICKER_GRACE_MS = 5 * 60 * 1000;
+function markNativePickerOpen() { nativePickerOpenAt = Date.now(); }
+function clearNativePickerFlag() { nativePickerOpenAt = 0; }
+function returningFromNativePicker() {
+  return nativePickerOpenAt > 0 && (Date.now() - nativePickerOpenAt) < NATIVE_PICKER_GRACE_MS;
+}
 var isConnected = false;
 var allMessages = [];
 var renderedMessageIds = new Set();
@@ -4213,6 +4220,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (document.hidden) {
         if (!currentUser) return;
         showPrivacyOverlay();
+        if (returningFromNativePicker()) return;
         try { sessionStorage.removeItem('chatpareja_refresh_pw'); } catch(e){}
         cleanupListeners();
         auth.signOut().then(function() {
@@ -4224,6 +4232,7 @@ document.addEventListener('DOMContentLoaded', function() {
           if (ss) { ss.classList.remove('hidden'); splashVisible = true; }
         });
       } else {
+        clearNativePickerFlag();
         hidePrivacyOverlay();
       }
     });
@@ -4319,8 +4328,14 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.optionCamera) el.optionCamera.addEventListener('click', function() { hideImageOptionsModal(); if (el.imageInputCamera) el.imageInputCamera.click(); });
   if (el.optionGallery) el.optionGallery.addEventListener('click', function() { hideImageOptionsModal(); if (el.imageInputGallery) el.imageInputGallery.click(); });
   if (el.imageOptionsCancel) el.imageOptionsCancel.addEventListener('click', hideImageOptionsModal);
-  if (el.imageInputCamera) el.imageInputCamera.addEventListener('change', function(e) { if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
-  if (el.imageInputGallery) el.imageInputGallery.addEventListener('change', function(e) { if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
+  if (el.imageInputCamera) el.imageInputCamera.addEventListener('change', function(e) { clearNativePickerFlag(); if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
+  if (el.imageInputGallery) el.imageInputGallery.addEventListener('change', function(e) { clearNativePickerFlag(); if (e.target.files.length > 0) showImagePreviewModal(e.target.files); e.target.value = ''; });
+  ['imageInputCamera', 'imageInputGallery', 'profileAvatarInput', 'chatBgInput', 'cartaImgInput'].forEach(function(k) {
+    if (el[k]) {
+      el[k].addEventListener('click', markNativePickerOpen);
+      el[k].addEventListener('change', clearNativePickerFlag);
+    }
+  });
   if (el.previewSendBtn) el.previewSendBtn.addEventListener('click', sendPendingImages);
   if (el.previewViewOnceBtn) el.previewViewOnceBtn.addEventListener('click', function() {
     pendingViewOnce = !pendingViewOnce;
