@@ -3125,11 +3125,11 @@ function startCalendarListener() {
 }
 
 function openCalendarModal() {
-  if (el.calendarModal) el.calendarModal.style.display = 'flex';
+  if (el.calendarModal) { el.calendarModal.classList.remove('hidden'); el.calendarModal.style.display = 'flex'; }
   renderCalendar();
 }
 function closeCalendarModal() {
-  if (el.calendarModal) el.calendarModal.style.display = 'none';
+  if (el.calendarModal) { el.calendarModal.classList.add('hidden'); el.calendarModal.style.display = 'none'; }
 }
 
 function renderCalendar() {
@@ -3238,7 +3238,7 @@ function saveCalendarEvent() {
     uid: currentUser.uid, autor: username || ''
   }).then(function() {
     showSuccess('Evento guardado');
-    if (el.eventModal) el.eventModal.style.display = 'none';
+    if (el.eventModal) { el.eventModal.classList.add('hidden'); el.eventModal.style.display = 'none'; }
   }).catch(function(e) {
     console.error('Calendar error:', e);
     showError('No se pudo guardar');
@@ -4630,13 +4630,13 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.calendarPrevBtn) el.calendarPrevBtn.addEventListener('click', function() { calendarMonth--; if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; } renderCalendar(); });
   if (el.calendarNextBtn) el.calendarNextBtn.addEventListener('click', function() { calendarMonth++; if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; } renderCalendar(); });
   if (el.calendarAddBtn) el.calendarAddBtn.addEventListener('click', function() {
-    if (el.eventModal) el.eventModal.style.display = 'flex';
+    if (el.eventModal) { el.eventModal.classList.remove('hidden'); el.eventModal.style.display = 'flex'; }
     if (el.eventTitleInput) el.eventTitleInput.value = '';
     if (el.eventDateInput) el.eventDateInput.value = calendarYear + '-' + String(calendarMonth + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0');
     if (el.eventRepeatCheck) el.eventRepeatCheck.checked = false;
     setTimeout(function() { if (el.eventTitleInput) el.eventTitleInput.focus(); }, 120);
   });
-  if (el.eventCancelBtn) el.eventCancelBtn.addEventListener('click', function() { if (el.eventModal) el.eventModal.style.display = 'none'; });
+  if (el.eventCancelBtn) el.eventCancelBtn.addEventListener('click', function() { if (el.eventModal) { el.eventModal.classList.add('hidden'); el.eventModal.style.display = 'none'; } });
   if (el.eventSaveBtn) el.eventSaveBtn.addEventListener('click', saveCalendarEvent);
 
   /* DETAILED STATS */
