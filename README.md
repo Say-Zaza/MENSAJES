@@ -37,7 +37,7 @@ Aplicación web de mensajería en tiempo real con **2 cuentas fijas de pareja** 
 ## ⚙️ Configuración inicial (UNA SOLA VEZ)
 
 ### 1. Habilitar Email/Password en Firebase Console
-1. Ve a https://console.firebase.google.com → proyecto **mensajes-31f68**.
+1. Ve a https://console.firebase.google.com → proyecto **race-master-3d-ee76f**.
 2. **Authentication → Sign-in method → Email/Password → Habilitar** y guardar.
 
 ### 2. Crear las 2 cuentas

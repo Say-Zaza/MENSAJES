@@ -447,7 +447,12 @@ async function getRoomDoc(roomId, token) {
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
     const data = await response.json();
     const values = data.fields?.pinnedMessages?.arrayValue?.values || [];
-    return { pinnedMessages: values.map(v => restFieldsToSnapshot(v.mapValue?.fields || {})) };
+    return { pinnedMessages: values.map(v => {
+      const f = v.mapValue?.fields || {};
+      const snap = restFieldsToSnapshot(f);
+      snap.id = f.id?.stringValue || snap.messageId || "";
+      return snap;
+    }) };
   } catch (err) {
     console.error(`❌ [SyncService] Error leyendo doc de sala ${roomId}:`, err.message);
     return { pinnedMessages: [] };
@@ -685,6 +690,12 @@ async function runSyncAndPrune(roomId = "general") {
   for (const remoteMsg of firestoreMessages) {
     const msgId = remoteMsg.id;
     if (pinnedIds.has(msgId)) { skippedPinnedCount++; continue; }
+    if (remoteMsg.viewOnce && remoteMsg.viewOnceViewed) {
+      console.log(`👁️ [SyncService] Mensaje ver-una-vez ya visto ${msgId} -> Eliminando de Firebase...`);
+      const deletedViewed = await deleteFirestoreMessage(roomId, msgId, token);
+      if (deletedViewed) { deletedFromFirebaseCount++; }
+      continue;
+    }
     const msgAgeMs = now - (remoteMsg.timestamp || now);
     if (msgAgeMs > THREE_DAYS_MS) {
       console.log(`🗑️ [SyncService] Mensaje ${msgId} (Antigüedad: ${(msgAgeMs / (1000 * 3600 * 24)).toFixed(1)} días) -> Eliminando de Firebase...`);

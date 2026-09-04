@@ -66,7 +66,7 @@ try {
   dbFirestore = admin.firestore();
   console.log('🔥 Firebase Admin inicializado (modo backup)');
 } catch (err) {
-  console.log('ℹ️ Firebase Admin SDK no configurado (usando SyncService REST API para respaldo local y purga de 5 días)');
+  console.log('ℹ️ Firebase Admin SDK no configurado (usando SyncService REST API para respaldo local y purga de 3 días)');
 }
 
 // Helpers del Admin SDK para operar arrays (destacados)
@@ -111,6 +111,13 @@ setInterval(() => {
   }
 }, 60000);
 
+// Bloquear archivos sensibles (nunca servirlos por HTTP)
+var BLOCKED_FILES = ['database.json', 'sync-config.json', 'accounts.json', 'serviceAccountKey.json', '.firebaserc', 'firebase.json', 'firestore.rules', 'firestore.indexes.json', 'storage.rules'];
+app.use(function(req, res, next) {
+  var base = path.basename(req.path);
+  if (BLOCKED_FILES.indexOf(base) >= 0) return res.status(403).send('Forbidden');
+  next();
+});
 // Servir frontend y carpeta media estática
 app.use(express.static(__dirname));
 app.use('/media', express.static(MEDIA_DIR));
@@ -465,13 +472,14 @@ io.on('connection', (socket) => {
   });
 });
 
-// Iniciar servidor local 24/7 y bucle de sincronización automática (cada 15 min)
-server.listen(PORT, '0.0.0.0', () => {
+// Servidor solo local (127.0.0.1): el sync loop no necesita exponerse a la LAN
+// y el cliente web usa Firebase directo, no este servidor.
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n🚀 Servidor backend local iniciado con éxito.`);
   console.log(`🌐 Aplicación disponible en http://localhost:${PORT}`);
   console.log(`📁 Base de datos guardando en ${DB_FILE}`);
   console.log(`🖼️ Archivos multimedia guardando en ${MEDIA_DIR}`);
   
-  // Iniciar Sync & Cleanup Loop (auto-descarga a la PC + purga de Firebase >5 días)
+  // Iniciar Sync & Cleanup Loop (auto-descarga a la PC + purga de Firebase >3 días)
   syncService.startSyncLoop(15, 'general');
 });

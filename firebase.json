@@ -14,7 +14,18 @@
       "sync-config.json",
       "create-accounts.js",
       "serviceAccountKey.json",
-      "start-server.bat"
+      "start-server.bat",
+      "accounts.json",
+      "database.json",
+      "media/**",
+      "sync-service.js",
+      "delete_users.js",
+      "delete_users_console.js",
+      "delete-text-messages.js",
+      "generate-icons.js",
+      "card-interface.html",
+      "tests/**",
+      "cypress/**"
     ],
     "rewrites": [
       {

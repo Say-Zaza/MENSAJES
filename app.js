@@ -410,8 +410,12 @@ function softRefresh() {
     startMessagesListener();
     startPinnedListener();
     startTypingListener();
+    startDestacadosListeners();
+    startPartnerShareSettingListener();
     startWishlistListener();
     startCartasListener();
+    startCalendarListener();
+    startRemindersListener();
     if (isOnline && currentUser) { flushOfflineQueue(); flushCartasOfflineQueue(); }
     loadPartnerProfile();
     showSuccess('Chat sincronizado');
@@ -448,11 +452,11 @@ function setTheme(theme) {
    ============================================ */
 var OFFLINE_QUEUE_KEY = 'chatpareja_offline';
 function getOfflineQueue() { try { var d = localStorage.getItem(OFFLINE_QUEUE_KEY); return d ? JSON.parse(d) : []; } catch(e){ return []; } }
-function saveOfflineQueue(q) { try { localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q)); } catch(e){} }
+function saveOfflineQueue(q) { try { localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q)); return true; } catch(e){ return false; } }
 function addToOfflineQueue(data) {
   var q = getOfflineQueue();
   q.push(data);
-  saveOfflineQueue(q);
+  if (!saveOfflineQueue(q)) showError('Sin espacio en cola offline: conecta internet para enviar');
   updatePendingIndicator();
 }
 function updatePendingIndicator() {
@@ -470,6 +474,7 @@ function flushOfflineQueue() {
   q.forEach(function(item) {
     var msgId = item.id || generateClientId();
     item.id = msgId;
+    item.timestamp = firebase.firestore.FieldValue.serverTimestamp();
     var p = db.collection(MESSAGES_COLLECTION).doc(msgId).set(item).then(function() {
       return true;
     }).catch(function() {
@@ -552,7 +557,7 @@ function startPartnerPresenceListener() {
       var online = d.online === true;
       updateHeaderBadge(online);
     });
-  }, function(){});
+  }, function(err){ console.error('Listener:', err && err.message); });
 }
 function updateHeaderBadge(partnerOnline) {
   var partner = getPartnerConfig();
@@ -616,7 +621,7 @@ function startPinnedListener() {
       var m = allMessages.find(function(x){ return x.id === mid; });
       if (m) updateRenderedMessage(m);
     });
-  }, function(){});
+  }, function(err){ console.error('Listener:', err && err.message); });
 }
 async function pinMessage(msgId, text, autor) {
   if (!currentUser || !msgId) return;
@@ -943,6 +948,7 @@ function initializeUser() {
     startCalendarListener();
     startRemindersListener();
     initE2ee();
+    try { if (typeof window.reloadChatBackground === 'function') window.reloadChatBackground(); } catch(e){}
     if (scheduledCartasInterval) clearInterval(scheduledCartasInterval);
     scheduledCartasInterval = setInterval(checkScheduledCartas, 60000);
     if (remindersCheckInterval) clearInterval(remindersCheckInterval);
@@ -1069,12 +1075,21 @@ function resizeImageForFirestore(base64Src) {
   return new Promise(function(resolve, reject) {
     var img = new Image();
     img.onload = function() {
-      var MAX = 2560, w = img.width, h = img.height;
+      var MAX = 1920, w = img.width, h = img.height;
       if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
       var c = document.createElement('canvas');
       c.width = w; c.height = h;
       c.getContext('2d').drawImage(img, 0, 0, w, h);
-      resolve(c.toDataURL('image/jpeg', 1.0));
+      var q = 0.85, out = c.toDataURL('image/jpeg', q);
+      while (out.length > 450000 && q > 0.30) { q -= 0.1; out = c.toDataURL('image/jpeg', q); }
+      if (out.length > 600000) {
+        var c2 = document.createElement('canvas');
+        c2.width = Math.max(1, Math.round(w * 0.6)); c2.height = Math.max(1, Math.round(h * 0.6));
+        c2.getContext('2d').drawImage(img, 0, 0, c2.width, c2.height);
+        out = c2.toDataURL('image/jpeg', 0.7);
+      }
+      if (out.length > 900000) { reject(new Error('La imagen es demasiado pesada aun comprimida')); return; }
+      resolve(out);
     };
     img.onerror = function(){ reject(new Error('Error loading image')); };
     img.src = base64Src;
@@ -1206,7 +1221,7 @@ function renderMessagesList() {
     var ts = msg.timestamp || 0;
     var d = new Date(ts);
     var ds = d.toDateString();
-    if (ds !== lastDateStr) {
+    if (ts && ds !== lastDateStr) {
       el.messagesContainer.appendChild(createDateSeparator(d));
       lastDateStr = ds; lastUid = null; lastTs = 0;
     }
@@ -1916,6 +1931,9 @@ function deleteMessage(msgId) {
   showConfirm('Eliminar este mensaje?').then(function(ok) {
     if (!ok) return;
     db.collection(MESSAGES_COLLECTION).doc(msgId).delete().catch(function(){ showError('Error al eliminar'); });
+    ['user1', 'user2'].forEach(function(slot) {
+      db.collection(DESTACADOS_COLLECTION).doc(slot).collection('items').doc(msgId).delete().catch(function(){});
+    });
   });
 }
 function showContextMenu(e, msg, isSelf) {
@@ -2760,12 +2778,12 @@ function startDestacadosListeners() {
       var m = allMessages.find(function(x){ return x.id === mid; });
       if (m) updateRenderedMessage(m);
     });
-  }, function(){});
+  }, function(err){ console.error('Listener:', err && err.message); });
   var partnerSlot = mySlot === 'user1' ? 'user2' : 'user1';
   partnerDestacadosUnsubscribe = db.collection(DESTACADOS_COLLECTION).doc(partnerSlot).collection('items').onSnapshot(function(snap) {
     partnerDestacados = []; partnerDestacadoIds = new Set();
     snap.forEach(function(doc) { var d = Object.assign({}, doc.data(), { id: doc.id }); partnerDestacados.push(d); partnerDestacadoIds.add(doc.id); });
-  }, function(){});
+  }, function(err){ console.error('Listener:', err && err.message); });
 }
 function startPartnerShareSettingListener() {
   var partner = getPartnerConfig();
@@ -2776,7 +2794,7 @@ function startPartnerShareSettingListener() {
       partnerShares = doc.data().shareDestacados === true;
       if (el.partnerDestacadosStatus) el.partnerDestacadosStatus.textContent = partnerShares ? 'Disponible' : 'No compartido';
     }
-  }, function(){});
+  }, function(err){ console.error('Listener:', err && err.message); });
 }
 async function toggleDestacado(msgId) {
   if (!currentUser || !msgId) return;
@@ -2826,6 +2844,7 @@ async function showDestacadosModal(type) {
     var resolved = await Promise.all(items.map(async function(d) {
       return { d: d, texto: isEncryptedText(d.texto) ? await decryptText(d.texto) : (d.texto || '') };
     }));
+    el.destacadosList.innerHTML = '';
     resolved.forEach(function(it) {
       var card = document.createElement('div'); card.className = 'destacado-card';
       card.innerHTML = '<div class="destacado-card-text">' + escapeHtml(it.texto) + '</div><span class="destacado-card-time">' + timeAgo(it.d.timestamp) + '</span>';
@@ -2903,7 +2922,12 @@ function cartaIsMine(c) {
   return c.deUid ? c.deUid === (currentUser && currentUser.uid) : c.deSlot === mySlot;
 }
 function myUnreadCount() {
-  return cartasItems.filter(function(c){ return cartaIsForMe(c) && !c.leida; }).length;
+  var nowMs = Date.now();
+  return cartasItems.filter(function(c){
+    if (!cartaIsForMe(c) || c.leida) return false;
+    if (c._scheduled && c.scheduledForMs && c.scheduledForMs > nowMs) return false;
+    return true;
+  }).length;
 }
 function updateCartasBadges() {
   var n = myUnreadCount();
@@ -2923,10 +2947,12 @@ function updateCartasBadges() {
 }
 function updateCartasStats() {
   var all = getAllCartasMerged();
+  var nowMs = Date.now();
+  function isDelivered(c) { return !(c._scheduled && c.scheduledForMs && c.scheduledForMs > nowMs); }
   var sent = all.filter(function(c) { return cartaIsMine(c); }).length;
-  var received = all.filter(function(c) { return cartaIsForMe(c); }).length;
+  var received = all.filter(function(c) { return cartaIsForMe(c) && isDelivered(c); }).length;
   var read = all.filter(function(c) { return cartaIsForMe(c) && c.leida; }).length;
-  var unread = all.filter(function(c) { return cartaIsForMe(c) && !c.leida; }).length;
+  var unread = all.filter(function(c) { return cartaIsForMe(c) && !c.leida && isDelivered(c); }).length;
   if (el.statSent) el.statSent.textContent = sent;
   if (el.statReceived) el.statReceived.textContent = received;
   if (el.statRead) el.statRead.textContent = read;
@@ -2935,7 +2961,13 @@ function updateCartasStats() {
 async function renderCartasList() {
   if (!el.cartasList) return;
   var mine = cartasTab === 'out';
-  var items = getAllCartasMerged().filter(function(c) { return mine ? cartaIsMine(c) : cartaIsForMe(c); });
+  var nowMs = Date.now();
+  var items = getAllCartasMerged().filter(function(c) {
+    if (mine) return cartaIsMine(c);
+    if (!cartaIsForMe(c)) return false;
+    if (c._scheduled && c.scheduledForMs && c.scheduledForMs > nowMs) return false;
+    return true;
+  });
   if (items.length === 0) {
     el.cartasList.innerHTML = '<div class="carta-empty">' + (mine
       ? 'Aún no enviaste ninguna carta 💌'
@@ -3000,6 +3032,10 @@ function setCartasTab(tab) {
   renderCartasList();
 }
 async function openCartaReader(c) {
+  if (c && !cartaIsMine(c) && c._scheduled && c.scheduledForMs && c.scheduledForMs > Date.now()) {
+    showInfo('Esta carta llegará el ' + new Date(c.scheduledForMs).toLocaleDateString('es-ES'));
+    return;
+  }
   currentCarta = c;
   var texto = isEncryptedText(c.texto) ? await decryptText(c.texto) : (c.texto || '');
   // Guarda: pudo llegar otro clic mientras desciframos
@@ -3045,6 +3081,7 @@ function sendCarta() {
   var btn = el.cartaSendBtn;
   if (btn) btn.disabled = true;
   function doSend(imageData) {
+    var schedDate = cartaScheduledDate;
     var encryptPromise = text === '📷' ? Promise.resolve('📷') : encryptText(text);
     encryptPromise.then(function(cipher) {
       var cartaId = generateClientId();
@@ -3062,9 +3099,9 @@ function sendCarta() {
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       if (imageData) data.imagen = imageData;
-      if (cartaScheduledDate) {
-        data.scheduledForMs = cartaScheduledDate.getTime();
-        data.scheduledFor = cartaScheduledDate.toISOString();
+      if (schedDate) {
+        data.scheduledForMs = schedDate.getTime();
+        data.scheduledFor = schedDate.toISOString();
         data._scheduled = true;
       }
       cartaPlainMap[cartaId] = text;
@@ -3077,10 +3114,10 @@ function sendCarta() {
       input.value = '';
       if (body) body.value = '';
       if (el.cartaCounter) el.cartaCounter.textContent = '0/4000';
-      if (cartaScheduledDate) {
-        showSuccess('Carta programada para ' + new Date(cartaScheduledDate).toLocaleDateString('es-ES') + ' ' + formatTime(cartaScheduledDate.getTime()));
-      } else {
-        sendCartaToFirestoreOrQueue(data, cartaId);
+      // Siempre se guarda en Firestore (también programadas): si no, se pierden al recargar
+      sendCartaToFirestoreOrQueue(data, cartaId, !!schedDate);
+      if (schedDate) {
+        showSuccess('Carta programada para ' + new Date(schedDate).toLocaleDateString('es-ES') + ' ' + formatTime(schedDate.getTime()));
       }
     }).catch(function(e) {
       console.error('Carta error:', e);
@@ -3088,15 +3125,16 @@ function sendCarta() {
     }).then(function() { if (btn) btn.disabled = false; });
   }
   if (cartaSelectedImage) {
-    resizeImageForFirestore(cartaSelectedImage).then(function(dataUrl) { doSend(dataUrl); });
+    resizeImageForFirestore(cartaSelectedImage).then(function(dataUrl) { doSend(dataUrl); })
+      .catch(function() { showError('No se pudo procesar la imagen'); if (btn) btn.disabled = false; });
   } else {
     doSend(null);
   }
 }
-function sendCartaToFirestoreOrQueue(data, cartaId) {
+function sendCartaToFirestoreOrQueue(data, cartaId, silentSuccess) {
   if (isOnline) {
     db.collection(CARTAS_COLLECTION).doc(cartaId).set(data).then(function() {
-      showSuccess('Carta enviada \uD83D\uDC8C');
+      if (!silentSuccess) showSuccess('Carta enviada 💌');
     }).catch(function(err) {
       console.error('Carta send error:', err);
       addToCartasOfflineQueue(data, cartaId);
@@ -3740,7 +3778,7 @@ function startWishlistListener() {
     wishlistItems.sort(function(a, b) { return (b.createdAtMs || b.createdAt || 0) - (a.createdAtMs || a.createdAt || 0); });
     if (el.wishlistCount) el.wishlistCount.textContent = wishlistItems.length > 0 ? wishlistItems.length : '';
     if (el.wishlistModal && el.wishlistModal.style.display === 'flex') renderWishlistList();
-  }, function(){});
+  }, function(err){ console.error('Listener:', err && err.message); });
 }
 async function renderWishlistList() {
   if (!el.wishlistList) return;
@@ -5007,6 +5045,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   initChatBackground();
+  try { window.reloadChatBackground = loadChatBackground; } catch(e){}
 
   if (el.chatBgInput) el.chatBgInput.addEventListener('change', function(e) {
     if (!e.target.files || !e.target.files[0]) return;
