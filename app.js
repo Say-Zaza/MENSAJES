@@ -3120,13 +3120,14 @@ function startCalendarListener() {
     snap.forEach(function(doc) { calendarEvents.push(Object.assign({}, doc.data(), { id: doc.id })); });
     calendarEvents.sort(function(a, b) { return (a.date || '').localeCompare(b.date || ''); });
     if (el.calendarCount) el.calendarCount.textContent = calendarEvents.length || '';
-    if (el.calendarModal && el.calendarModal.style.display === 'flex') renderCalendar();
+    renderCalendar();
   }, function(err) { console.error('Calendar listener:', err); });
 }
 
 function openCalendarModal() {
   if (el.calendarModal) { el.calendarModal.classList.remove('hidden'); el.calendarModal.style.display = 'flex'; }
   renderCalendar();
+  renderCalendarEvents();
 }
 function closeCalendarModal() {
   if (el.calendarModal) { el.calendarModal.classList.add('hidden'); el.calendarModal.style.display = 'none'; }
@@ -3240,6 +3241,7 @@ function saveCalendarEvent() {
   }).then(function() {
     showSuccess('Evento guardado');
     if (el.eventModal) { el.eventModal.classList.add('hidden'); el.eventModal.style.display = 'none'; }
+    renderCalendar();
   }).catch(function(e) {
     console.error('Calendar error:', e);
     showError('No se pudo guardar: ' + (e.message || e));
