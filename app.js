@@ -462,6 +462,21 @@ function addToOfflineQueue(data) {
 function updatePendingIndicator() {
   var q = getOfflineQueue();
   if (!el.pendingIndicator) return;
+  if (!el.pendingIndicator._discardBound) {
+    el.pendingIndicator._discardBound = true;
+    el.pendingIndicator.style.cursor = 'pointer';
+    el.pendingIndicator.title = 'Toca para descartar pendientes';
+    el.pendingIndicator.addEventListener('click', function() {
+      var qq = getOfflineQueue();
+      if (!qq.length) return;
+      showConfirm('Descartar ' + qq.length + ' mensaje(s) pendiente(s) que no se pudieron enviar?').then(function(ok) {
+        if (!ok) return;
+        saveOfflineQueue([]);
+        updatePendingIndicator();
+        showSuccess('Pendientes descartados');
+      });
+    });
+  }
   if (q.length > 0) { el.pendingIndicator.textContent = q.length + ' pendiente' + (q.length > 1 ? 's' : ''); el.pendingIndicator.style.display = 'inline'; }
   else { el.pendingIndicator.style.display = 'none'; }
 }
@@ -471,13 +486,21 @@ function flushOfflineQueue() {
   if (!q.length) return;
   var remaining = [];
   var promises = [];
+  var droppedHeavy = 0, droppedRetries = 0;
   q.forEach(function(item) {
     var msgId = item.id || generateClientId();
     item.id = msgId;
+    var attempts = item.__attempts || 0;
+    delete item.__attempts;
+    var size = 0;
+    try { size = JSON.stringify(item).length; } catch(e){}
+    if (size > 900000) { droppedHeavy++; return; }
+    if (attempts >= 5) { droppedRetries++; return; }
     item.timestamp = firebase.firestore.FieldValue.serverTimestamp();
     var p = db.collection(MESSAGES_COLLECTION).doc(msgId).set(item).then(function() {
       return true;
     }).catch(function() {
+      item.__attempts = attempts + 1;
       remaining.push(item);
       return false;
     });
@@ -486,6 +509,8 @@ function flushOfflineQueue() {
   Promise.allSettled(promises).then(function() {
     saveOfflineQueue(remaining);
     updatePendingIndicator();
+    if (droppedHeavy > 0) showError('Un mensaje era muy pesado y no se pudo enviar');
+    else if (droppedRetries > 0) showError('Se descartó un pendiente que falló varias veces');
   });
 }
 
