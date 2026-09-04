@@ -4142,7 +4142,10 @@ document.addEventListener('DOMContentLoaded', function() {
         auth.signOut().then(function() {
           currentUser = null;
           currentUserRole = null;
-          showLoginScreen();
+          if (el.loginScreen) el.loginScreen.style.display = 'none';
+          if (el.chatContainer) el.chatContainer.style.display = 'none';
+          var ss = document.getElementById('splash-screen');
+          if (ss) { ss.classList.remove('hidden'); splashVisible = true; }
         });
       }
     });
