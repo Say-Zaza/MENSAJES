@@ -3376,17 +3376,14 @@ function saveReminder() {
   });
 }
 
+var REMINDER_NAG_MS = 15 * 60 * 1000;
 function checkRemindersDue() {
   if (!currentUser) return;
   var now = Date.now();
   remindersItems.forEach(function(r) {
-    if (!r.done && r.remindAtMs && r.remindAtMs <= now && !r._notified) {
-      r._notified = true;
+    if (!r.done && r.remindAtMs && r.remindAtMs <= now && (!r._lastNotifiedMs || (now - r._lastNotifiedMs) >= REMINDER_NAG_MS)) {
+      r._lastNotifiedMs = now;
       showSuccess('⏰ ' + (r.title || 'Recordatorio'));
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('⏰ Recordatorio', { body: r.title || 'Tu recordatorio', icon: '/icon-192.png' });
-      }
       if (r.repeat) {
         var nextDay = new Date(r.remindAtMs);
         nextDay.setDate(nextDay.getDate() + 1);
