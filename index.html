@@ -1034,6 +1034,13 @@
         <option value="urgent">🔴 Urgente</option>
         <option value="low">🔵 Baja prioridad</option>
       </select>
+      <select id="reminder-pre-select" class="event-input">
+        <option value="0">🔕 Avisar solo al vencer</option>
+        <option value="5">🔔 Avisar 5 min antes</option>
+        <option value="15" selected>🔔 Avisar 15 min antes</option>
+        <option value="30">🔔 Avisar 30 min antes</option>
+        <option value="60">🔔 Avisar 60 min antes</option>
+      </select>
       <label class="event-repeat-row">
         <input type="checkbox" id="reminder-repeat-check"/>
         <span>Se repite cada día</span>
@@ -1132,7 +1139,7 @@
   </div>
 
   <!-- Socket.io se carga dinámicamente solo si se detecta el servidor local -->
-  <script src="app.js?v=20260904e"></script>
+  <script src="app.js?v=20260904f"></script>
 
   <script>
     if ('serviceWorker' in navigator) {

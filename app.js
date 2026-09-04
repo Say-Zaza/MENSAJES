@@ -3358,13 +3358,15 @@ function saveReminder() {
   var dt = el.reminderDatetimeInput ? el.reminderDatetimeInput.value : '';
   var priority = el.reminderPrioritySelect ? el.reminderPrioritySelect.value : 'normal';
   var repeat = el.reminderRepeatCheck ? el.reminderRepeatCheck.checked : false;
+  var preMin = el.reminderPreSelect ? parseInt(el.reminderPreSelect.value, 10) : 15;
+  if (isNaN(preMin) || preMin < 0) preMin = 15;
   if (!title) { showError('Escribe qué recordar'); return; }
   if (!dt) { showError('Selecciona fecha y hora'); return; }
   var remindAt = new Date(dt);
   if (remindAt.getTime() <= Date.now()) { showError('La fecha debe ser en el futuro'); return; }
   db.collection(REMINDERS_COLLECTION).add({
     title: title, remindAtMs: remindAt.getTime(), remindAt: dt,
-    priority: priority, repeat: repeat, done: false,
+    priority: priority, repeat: repeat, notifyBeforeMin: preMin, done: false,
     createdAtMs: Date.now(), createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     uid: currentUser.uid, autor: username || ''
   }).then(function() {
@@ -3381,7 +3383,15 @@ function checkRemindersDue() {
   if (!currentUser) return;
   var now = Date.now();
   remindersItems.forEach(function(r) {
-    if (!r.done && r.remindAtMs && r.remindAtMs <= now && (!r._lastNotifiedMs || (now - r._lastNotifiedMs) >= REMINDER_NAG_MS)) {
+    if (r.done || !r.remindAtMs) return;
+    var preMin = (r.notifyBeforeMin === undefined || r.notifyBeforeMin === null) ? 15 : r.notifyBeforeMin;
+    var preMs = preMin * 60 * 1000;
+    if (r.remindAtMs > now && preMs > 0 && (r.remindAtMs - now) <= preMs && !r._preNotified) {
+      r._preNotified = true;
+      showSuccess('🔔 En ' + preMin + ' min: ' + (r.title || 'Recordatorio'));
+      return;
+    }
+    if (r.remindAtMs <= now && (!r._lastNotifiedMs || (now - r._lastNotifiedMs) >= REMINDER_NAG_MS)) {
       r._lastNotifiedMs = now;
       showSuccess('⏰ ' + (r.title || 'Recordatorio'));
       if (r.repeat) {
@@ -4114,6 +4124,7 @@ document.addEventListener('DOMContentLoaded', function() {
     reminderTitleInput: document.getElementById('reminder-title-input'),
     reminderDatetimeInput: document.getElementById('reminder-datetime-input'),
     reminderPrioritySelect: document.getElementById('reminder-priority-select'),
+    reminderPreSelect: document.getElementById('reminder-pre-select'),
     reminderRepeatCheck: document.getElementById('reminder-repeat-check'),
     reminderCancelBtn: document.getElementById('reminder-cancel-btn'),
     reminderSaveBtn: document.getElementById('reminder-save-btn')
