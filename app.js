@@ -1345,12 +1345,9 @@ function buildBubbleContent(msg, bubble, isSelf) {
       ph.className = 'viewonce-placeholder';
       ph.innerHTML = '<span class="material-symbols-outlined viewonce-icon">visibility</span><span class="viewonce-label">Toca para ver una vez</span>';
       ph.addEventListener('click', function() {
-        var imgs = allMessages.filter(function(m) { return m.imageBase64 && !(m.viewOnce && m.uid !== currentUser.uid && m.viewOnceViewed); }).map(function(m) { return m.imageBase64; });
-        var idx = imgs.indexOf(msg.imageBase64);
-        if (idx < 0) { imgs.unshift(msg.imageBase64); idx = 0; }
         db.collection('rooms/' + ROOM_ID + '/messages').doc(msg.id).update({ viewOnceViewed: true }).catch(function(){});
         msg.viewOnceViewed = true;
-        openLightbox(msg.imageBase64, imgs, idx, true);
+        openLightbox(msg.imageBase64, [msg.imageBase64], 0, true);
       });
       iw.appendChild(ph);
       iw.style.aspectRatio = 'auto';
@@ -1360,7 +1357,7 @@ function buildBubbleContent(msg, bubble, isSelf) {
       im.src = msg.imageBase64; im.alt = 'Imagen'; im.className = 'message-image'; im.loading = 'lazy';
       im.onload = function() { this.classList.add('loaded'); };
       im.addEventListener('click', function() {
-        var imgs = allMessages.filter(function(m) { return m.imageBase64; }).map(function(m) { return m.imageBase64; });
+        var imgs = allMessages.filter(function(m) { return m.imageBase64 && !m.viewOnce; }).map(function(m) { return m.imageBase64; });
         var idx = imgs.indexOf(msg.imageBase64);
         openLightbox(msg.imageBase64, imgs, idx >= 0 ? idx : 0);
       });
