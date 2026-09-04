@@ -3226,6 +3226,7 @@ function showEventOnDay(ev) {
 }
 
 function saveCalendarEvent() {
+  if (!currentUser) { showError('Debes iniciar sesión'); return; }
   var title = el.eventTitleInput ? el.eventTitleInput.value.trim() : '';
   var date = el.eventDateInput ? el.eventDateInput.value : '';
   var type = el.eventTypeSelect ? el.eventTypeSelect.value : 'other';
@@ -3241,7 +3242,7 @@ function saveCalendarEvent() {
     if (el.eventModal) { el.eventModal.classList.add('hidden'); el.eventModal.style.display = 'none'; }
   }).catch(function(e) {
     console.error('Calendar error:', e);
-    showError('No se pudo guardar');
+    showError('No se pudo guardar: ' + (e.message || e));
   });
 }
 
