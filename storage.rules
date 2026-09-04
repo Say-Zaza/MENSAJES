@@ -1,8 +1,16 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function isAllowedAccount() {
+      return request.auth != null
+        && (request.auth.token.email == 'hombre@chatpareja.app'
+          || request.auth.token.email == 'mujer@chatpareja.app');
+    }
+    match /voice_messages/{allPaths=**} {
+      allow read, write: if isAllowedAccount();
+    }
     match /chat-images/{roomId}/{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isAllowedAccount();
     }
   }
 }

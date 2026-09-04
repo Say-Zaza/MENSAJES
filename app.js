@@ -496,7 +496,7 @@ function startTypingListener() {
       var ind = document.getElementById('typing-indicator');
       if (!ind) return;
       if ((change.type === 'added' || change.type === 'modified') && d.isTyping) {
-        ind.innerHTML = '<span>' + escapeHtml(d.username || '') + ' escribiendo</span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+        ind.innerHTML = '<span>' + escapeHtml(d.username || '') + ' está escribiendo</span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
         ind.classList.remove('hidden');
         ind.style.display = 'flex';
         clearTimeout(partnerTypingTimeout);
@@ -1213,6 +1213,7 @@ function renderMessagesList() {
     var isGrouped = lastUid === msg.uid && ts - lastTs < 120000;
     lastUid = msg.uid; lastTs = ts;
     var wrapper = createMessageElement(msg, isSelf, isGrouped);
+    if (pendingHighlightId && msg.id === pendingHighlightId && Date.now() < pendingHighlightUntil) wrapper.classList.add('highlight-flash');
     el.messagesContainer.appendChild(wrapper);
     renderedMessageIds.add(msg.id);
   });
@@ -1714,15 +1715,10 @@ function refreshDateSeparators() {
 
 
 /* REACTIONS */
-function toggleReaction(msgId, emoji) {
-  if (!currentUser || !msgId) return;
-  var msg = allMessages.find(function(m){ return m.id === msgId; });
-  if (!msg) return;
-  
-  var reactions = JSON.parse(JSON.stringify(msg.reactions || {}));
+function computeReactionToggle(baseReactions, emoji, uid) {
+  var reactions = JSON.parse(JSON.stringify(baseReactions || {}));
   var uids = reactions[emoji] ? reactions[emoji].slice() : [];
-  var idx = uids.indexOf(currentUser.uid);
-  
+  var idx = uids.indexOf(uid);
   if (idx >= 0) {
     uids.splice(idx, 1);
     if (uids.length === 0) { delete reactions[emoji]; }
@@ -1731,27 +1727,43 @@ function toggleReaction(msgId, emoji) {
     // Quitar MI reacción de otros emojis y AÑADIRME al emoji nuevo (conservando a mi pareja)
     Object.keys(reactions).forEach(function(e) {
       var arr = reactions[e] ? reactions[e].slice() : [];
-      var i = arr.indexOf(currentUser.uid);
+      var i = arr.indexOf(uid);
       if (i >= 0) { arr.splice(i, 1); }
       if (arr.length === 0) { delete reactions[e]; }
       else { reactions[e] = arr; }
     });
     var target = reactions[emoji] ? reactions[emoji].slice() : [];
-    if (target.indexOf(currentUser.uid) < 0) target.push(currentUser.uid);
+    if (target.indexOf(uid) < 0) target.push(uid);
     reactions[emoji] = target;
   }
-  
+  return reactions;
+}
+function toggleReaction(msgId, emoji) {
+  if (!currentUser || !msgId) return;
+  var myUid = currentUser.uid;
+  var msg = allMessages.find(function(m){ return m.id === msgId; });
+  if (!msg) return;
+
+  var prevReactions = JSON.parse(JSON.stringify(msg.reactions || {}));
+  var optimistic = computeReactionToggle(prevReactions, emoji, myUid);
   var msgIndex = allMessages.findIndex(function(m){ return m.id === msgId; });
-  if (msgIndex >= 0) { allMessages[msgIndex].reactions = reactions; }
-  
+  if (msgIndex >= 0) { allMessages[msgIndex].reactions = optimistic; }
+
   var wrapper = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
   if (wrapper) { updateRenderedMessage(allMessages[msgIndex] || msg); }
-  
-  db.collection(MESSAGES_COLLECTION).doc(msgId).update({ reactions: reactions }).then(function() {
+
+  // Transacción atómica sobre el estado del SERVIDOR: reacciones simultáneas no se pisan
+  var ref = db.collection(MESSAGES_COLLECTION).doc(msgId);
+  db.runTransaction(function(tx) {
+    return tx.get(ref).then(function(doc) {
+      var serverReactions = (doc.exists && doc.data().reactions) || {};
+      tx.update(ref, { reactions: computeReactionToggle(serverReactions, emoji, myUid) });
+    });
   }).catch(function(err) {
     console.error('Reaction error:', err);
-    if (msgIndex >= 0) { allMessages[msgIndex].reactions = msg.reactions || {}; }
-    if (wrapper) { updateRenderedMessage(allMessages[msgIndex] || msg); }
+    if (msgIndex >= 0) { allMessages[msgIndex].reactions = prevReactions; }
+    var w2 = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
+    if (w2) { updateRenderedMessage(allMessages[msgIndex] || msg); }
   });
 }
 function setReplyPreview(msg) {
@@ -2823,9 +2835,28 @@ async function showDestacadosModal(type) {
   }
 }
 function hideDestacadosModal() { exitSubPanel(el.destacadosModal); }
+var pendingHighlightId = null, pendingHighlightUntil = 0, suppressLoadOlderUntil = 0;
 function scrollToMessage(msgId) {
-  var w = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
-  if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); w.classList.add('highlight-flash'); setTimeout(function(){ w.classList.remove('highlight-flash'); }, 2000); }
+  if (!msgId || !el.messagesContainer) return;
+  pendingHighlightId = msgId;
+  pendingHighlightUntil = Date.now() + 2600;
+  suppressLoadOlderUntil = Date.now() + 900;
+  var w = el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]');
+  if (w) { w.scrollIntoView({ behavior: 'smooth', block: 'center' }); w.classList.add('highlight-flash'); }
+  setTimeout(function() {
+    var cur = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
+    if (cur) {
+      var r = cur.getBoundingClientRect(), c = el.messagesContainer.getBoundingClientRect();
+      if (r.top < c.top || r.bottom > c.bottom) cur.scrollIntoView({ behavior: 'auto', block: 'center' });
+      if (Date.now() < pendingHighlightUntil) cur.classList.add('highlight-flash');
+    }
+    if (Date.now() >= pendingHighlightUntil) pendingHighlightId = null;
+  }, 750);
+  setTimeout(function() {
+    pendingHighlightId = null;
+    var cur2 = el.messagesContainer ? el.messagesContainer.querySelector('[data-msg-id="' + msgId + '"]') : null;
+    if (cur2) cur2.classList.remove('highlight-flash');
+  }, 2700);
 }
 
 /* ============================================
@@ -4775,7 +4806,7 @@ document.addEventListener('DOMContentLoaded', function() {
   if (el.scrollToBottomBtn) el.scrollToBottomBtn.addEventListener('click', scrollToBottom);
   if (el.messagesContainer) el.messagesContainer.addEventListener('scroll', function() {
     if (isUserAtBottom()) { unreadCount = 0; updateScrollButton(); }
-    if (el.messagesContainer.scrollTop < 80 && allMessages.length > visibleCount && !loadingOlder && firstSnapshotReceived) {
+    if (el.messagesContainer.scrollTop < 80 && allMessages.length > visibleCount && !loadingOlder && firstSnapshotReceived && Date.now() >= suppressLoadOlderUntil) {
       loadOlderMessages();
     }
   });

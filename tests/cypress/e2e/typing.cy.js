@@ -1,7 +1,7 @@
 /// <reference types="cypress" />
 
 const FIREBASE_API_KEY = 'AIzaSyALVjHZtbEJGAx2pswt4l4h654ieGJw_tk';
-const FIREBASE_PROJECT_ID = 'mensajes-31f68';
+const FIREBASE_PROJECT_ID = 'race-master-3d-ee76f';
 const ROOM_ID = 'general';
 const TYPING_DOC_PATH = `rooms/${ROOM_ID}/typing`;
 
@@ -41,19 +41,15 @@ describe('Typing Indicator', () => {
     }
   });
 
-it('shows partner typing indicator', () => {
+  it('shows partner typing indicator', () => {
+    // Construir el objeto DENTRO de la página (win.eval): evita el error
+    // "custom Object object" de Firestore con objetos cross-realm de Cypress
     cy.window().then((win) => {
-      return win.db.collection(TYPING_DOC_PATH).doc(partnerUid).set({
-        uid: partnerUid,
-        username: 'Mi Amor',
-        isTyping: true,
-        updatedAt: new Date().toISOString()
-      });
+      return win.eval(
+        "db.collection('" + TYPING_DOC_PATH + "').doc('" + partnerUid + "')" +
+        ".set({uid:'" + partnerUid + "',username:'Mi Amor',isTyping:true,updatedAt:'" + new Date().toISOString() + "'})"
+      );
     });
-
-    cy.get('#typing-indicator').should('not.have.class', 'hidden');
-    cy.get('#typing-indicator').should('contain', 'Mi Amor estǭ escribiendo');
-  });
 
     cy.get('#typing-indicator').should('not.have.class', 'hidden');
     cy.get('#typing-indicator').should('contain', 'Mi Amor está escribiendo');

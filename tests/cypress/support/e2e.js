@@ -49,6 +49,19 @@ Cypress.Commands.add('login', (key = 'user1') => {
   });
 });
 
+// Cambio de usuario A MITAD de test: espera a que la APP haya sincronizado
+// su currentUser interno, no solo Firebase Auth. Sin esto las acciones se
+// ejecutan con el usuario anterior (stale) y pisan datos del otro.
+Cypress.Commands.add('switchUser', (key = 'user1') => {
+  cy.login(key);
+  cy.window({ timeout: 20000 }).should((win) => {
+    expect(win.currentUser, 'app currentUser').to.not.be.null;
+    expect(win.auth.currentUser, 'auth currentUser').to.not.be.null;
+    expect(win.currentUser.uid, 'app uid sincronizado').to.eq(win.auth.currentUser.uid);
+  });
+  cy.get('#message-input', { timeout: 20000 }).should('not.be.disabled');
+});
+
 Cypress.Commands.add('waitForReady', (key = 'user1') => {
   cy.login(key);
   cy.get('#user-badge', { timeout: 20000 }).should('not.contain', 'Desconectado');
@@ -69,7 +82,7 @@ Cypress.on('uncaught:exception', (err, runnable) => {
 });
 
 const FIREBASE_API_KEY = 'AIzaSyALVjHZtbEJGAx2pswt4l4h654ieGJw_tk';
-const FIREBASE_PROJECT_ID = 'mensajes-31f68';
+const FIREBASE_PROJECT_ID = 'race-master-3d-ee76f';
 const ROOM_ID = 'general';
 
 Cypress.Commands.add('getPartnerToken', () => {

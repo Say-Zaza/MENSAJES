@@ -149,11 +149,11 @@ describe('Reactions - Horizontal Picker', () => {
       cy.sendMessage(testMsg);
       cy.waitForMessage(testMsg);
 
-      cy.login('user2');
+      cy.switchUser('user2');
       cy.waitForMessage(testMsg);
       cy.pickReaction(testMsg, 0);
-      
-      cy.login('user1');
+
+      cy.switchUser('user1');
       cy.waitForMessage(testMsg);
       cy.get('.reaction-bubble', { timeout: 20000 }).should('exist');
     });
@@ -166,11 +166,11 @@ describe('Reactions - Horizontal Picker', () => {
       cy.pickReaction(testMsg, 0);
       cy.get('.reaction-bubble', { timeout: 15000 }).should('exist');
       
-      cy.login('user2');
+      cy.switchUser('user2');
       cy.waitForMessage(testMsg);
       cy.pickReaction(testMsg, 0);
-      
-      cy.login('user1');
+
+      cy.switchUser('user1');
       cy.waitForMessage(testMsg);
       // Verdad de servidor: el documento debe tener 2 uids en la misma reacción
       cy.window().then((win) => {
