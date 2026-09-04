@@ -3197,9 +3197,20 @@ function renderCalendarEvents() {
     var date = document.createElement('div');
     date.className = 'calendar-event-date';
     var d = new Date(ev.date + 'T00:00:00');
-    date.textContent = d.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' }) + (ev.repeat ? ' 🔄' : '');
+    date.textContent = d.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) + (ev.repeat ? ' 🔄' : '');
     info.appendChild(name);
     info.appendChild(date);
+    item.style.cursor = 'pointer';
+    item.addEventListener('click', function() {
+      try {
+        var parts = ev.date.split('-');
+        if (parts.length === 3) {
+          calendarYear = parseInt(parts[0], 10);
+          calendarMonth = parseInt(parts[1], 10) - 1;
+          renderCalendar();
+        }
+      } catch(e){}
+    });
     var del = document.createElement('button');
     del.className = 'calendar-event-del';
     del.innerHTML = '✕';
