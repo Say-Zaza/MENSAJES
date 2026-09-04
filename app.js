@@ -336,6 +336,7 @@ function tryLoginWithPassword(pw) {
   });
 }
 function showLoginScreen() {
+  hidePrivacyOverlay();
   if (el.loginScreen) { el.loginScreen.style.display = 'flex'; }
   if (el.chatContainer) { el.chatContainer.style.display = 'none'; }
   if (el.loginSubmitBtn) { el.loginSubmitBtn.disabled = false; el.loginSubmitBtn.querySelector('.btn-text').textContent = 'Entrar'; }
@@ -4172,8 +4173,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.addEventListener('visibilitychange', function() {
       if (document.hidden) {
-        showPrivacyOverlay();
         if (!currentUser) return;
+        showPrivacyOverlay();
         try { sessionStorage.removeItem('chatpareja_refresh_pw'); } catch(e){}
         cleanupListeners();
         auth.signOut().then(function() {
@@ -4188,9 +4189,9 @@ document.addEventListener('DOMContentLoaded', function() {
         hidePrivacyOverlay();
       }
     });
-    window.addEventListener('blur', function() { showPrivacyOverlay(); });
+    window.addEventListener('blur', function() { if (currentUser) showPrivacyOverlay(); });
     window.addEventListener('focus', function() { if (!document.hidden) hidePrivacyOverlay(); });
-    window.addEventListener('pagehide', function() { showPrivacyOverlay(); });
+    window.addEventListener('pagehide', function() { if (currentUser) showPrivacyOverlay(); });
 
   /* PAIRING */
   var pairingGenerateBtn = document.getElementById('pairing-generate-btn');
