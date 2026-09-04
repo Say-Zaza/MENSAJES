@@ -886,11 +886,9 @@ function initializeUser() {
     startPartnerShareSettingListener();
     startWishlistListener();
     startCartasListener();
-    initChatBackground();
     startCalendarListener();
     startRemindersListener();
     initE2ee();
-    loadChatBackground();
     if (scheduledCartasInterval) clearInterval(scheduledCartasInterval);
     scheduledCartasInterval = setInterval(checkScheduledCartas, 60000);
     if (remindersCheckInterval) clearInterval(remindersCheckInterval);
@@ -3116,14 +3114,12 @@ function startCalendarListener() {
   if (!currentUser) return;
   if (calendarUnsubscribe) { calendarUnsubscribe(); calendarUnsubscribe = null; }
   calendarUnsubscribe = db.collection(CALENDAR_COLLECTION).onSnapshot(function(snap) {
-    console.log('[CALENDAR DEBUG] Listener fired, docs:', snap.size);
     calendarEvents = [];
     snap.forEach(function(doc) { calendarEvents.push(Object.assign({}, doc.data(), { id: doc.id })); });
-    console.log('[CALENDAR DEBUG] Events loaded:', JSON.stringify(calendarEvents));
     calendarEvents.sort(function(a, b) { return (a.date || '').localeCompare(b.date || ''); });
     if (el.calendarCount) el.calendarCount.textContent = calendarEvents.length || '';
     renderCalendar();
-  }, function(err) { console.error('Calendar listener ERROR:', err.code, err.message); showError('Error calendario: ' + err.message); });
+  }, function(err) { console.error('Calendar listener:', err); });
 }
 
 function openCalendarModal() {
@@ -3148,7 +3144,6 @@ function renderCalendar() {
     var d = ev.date;
     if (d) eventDates[d] = ev;
   });
-  console.log('[CALENDAR DEBUG] renderCalendar, month:', calendarMonth, 'year:', calendarYear, 'eventDates:', JSON.stringify(Object.keys(eventDates)));
   var html = '';
   var prevMonthDays = new Date(calendarYear, calendarMonth, 0).getDate();
   for (var i = startDay - 1; i >= 0; i--) {
