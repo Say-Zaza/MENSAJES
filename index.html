@@ -190,6 +190,8 @@
     </style>
 </head>
 <body>
+  <!-- Privacy Overlay (black screen for recent-apps preview) -->
+  <div id="privacy-overlay" class="privacy-overlay hidden" aria-hidden="true"></div>
   <!-- Splash Screen -->
   <div id="splash-screen" class="splash-screen">
     <div class="splash-dot splash-dot-br">🛞</div>
@@ -1130,7 +1132,7 @@
   </div>
 
   <!-- Socket.io se carga dinámicamente solo si se detecta el servidor local -->
-  <script src="app.js?v=20260904c"></script>
+  <script src="app.js?v=20260904d"></script>
 
   <script>
     if ('serviceWorker' in navigator) {

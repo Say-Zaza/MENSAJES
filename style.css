@@ -98,6 +98,15 @@ input, textarea { font-family: inherit; }
 .hidden { display: none; }
 
 /* ============================================
+   PRIVACY OVERLAY (black screen for recent-apps preview)
+   ============================================ */
+.privacy-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: #000;
+}
+.privacy-overlay.hidden { display: none; }
+
+/* ============================================
    SPLASH SCREEN
    ============================================ */
 .splash-screen {

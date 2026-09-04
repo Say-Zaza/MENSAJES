@@ -348,6 +348,14 @@ function hideLoginScreen() {
   var ss = document.getElementById('splash-screen');
   if (ss && !ss.classList.contains('hidden')) { ss.classList.add('hidden'); splashVisible = false; }
 }
+function showPrivacyOverlay() {
+  var po = document.getElementById('privacy-overlay');
+  if (po) po.classList.remove('hidden');
+}
+function hidePrivacyOverlay() {
+  var po = document.getElementById('privacy-overlay');
+  if (po) po.classList.add('hidden');
+}
 function softRefresh() {
   allMessages = [];
   renderedMessageIds = new Set();
@@ -4155,7 +4163,9 @@ document.addEventListener('DOMContentLoaded', function() {
     tryAutoLogin();
 
     document.addEventListener('visibilitychange', function() {
-      if (document.hidden && currentUser) {
+      if (document.hidden) {
+        showPrivacyOverlay();
+        if (!currentUser) return;
         try { sessionStorage.removeItem('chatpareja_refresh_pw'); } catch(e){}
         cleanupListeners();
         auth.signOut().then(function() {
@@ -4166,8 +4176,13 @@ document.addEventListener('DOMContentLoaded', function() {
           var ss = document.getElementById('splash-screen');
           if (ss) { ss.classList.remove('hidden'); splashVisible = true; }
         });
+      } else {
+        hidePrivacyOverlay();
       }
     });
+    window.addEventListener('blur', function() { showPrivacyOverlay(); });
+    window.addEventListener('focus', function() { if (!document.hidden) hidePrivacyOverlay(); });
+    window.addEventListener('pagehide', function() { showPrivacyOverlay(); });
 
   /* PAIRING */
   var pairingGenerateBtn = document.getElementById('pairing-generate-btn');
