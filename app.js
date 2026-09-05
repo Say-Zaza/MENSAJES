@@ -4309,8 +4309,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.addEventListener('visibilitychange', function() {
       if (document.hidden) {
-        if (!currentUser) return;
         showPrivacyOverlay();
+        if (!currentUser) return;
         if (returningFromNativePicker()) return;
         try { sessionStorage.removeItem('chatpareja_refresh_pw'); } catch(e){}
         cleanupListeners();
@@ -4329,7 +4329,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     window.addEventListener('blur', function() { if (currentUser) showPrivacyOverlay(); });
     window.addEventListener('focus', function() { if (!document.hidden) hidePrivacyOverlay(); });
-    window.addEventListener('pagehide', function() { if (currentUser) showPrivacyOverlay(); });
+    window.addEventListener('pagehide', function() { showPrivacyOverlay(); });
 
   /* PAIRING */
   var pairingGenerateBtn = document.getElementById('pairing-generate-btn');
